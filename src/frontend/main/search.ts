@@ -20,6 +20,8 @@ export class Search
 	private index: MiniSearch; // MiniSearch
 	private input: HTMLInputElement;
 	private container: HTMLElement;
+	private static readonly inlineMarkClass = "search-mark";
+	private static readonly tagMarkClass = "search-tag-mark";
 
 	// only used when the file tree is not present
 	private dedicatedSearchResultsList: HTMLElement;
@@ -55,13 +57,18 @@ export class Search
 		console.log(type & SearchType.Title, type & SearchType.Aliases, type & SearchType.Headers, type & SearchType.Tags, type & SearchType.Path, type & SearchType.Content);
 	
 		
-		const results: Array<SearchResult> = this.index.search(query, 
+		let results: Array<SearchResult> = this.index.search(query,
 		{ 
 			prefix: true, 
 			fuzzy: 0.2, 
 			boost: { title: 2, aliases: 1.8, headers: 1.5, tags: 1.3, path: 1.1 }, 
 			fields: searchFields 
 		});
+
+		if (type === SearchType.Tags)
+		{
+			results = this.filterTagResults(results, query);
+		}
 
 		console.log("Search results", results);
 
@@ -143,45 +150,54 @@ export class Search
 	
 	}
 
+	private filterTagResults(results: Array<SearchResult>, query: string): Array<SearchResult>
+	{
+		const normalizedQuery = query.trim().replace(/^#+/, "").toLowerCase();
+		if (normalizedQuery.length == 0) return results;
+
+		return results.filter((result: any) =>
+		{
+			const tags = (result.tags ?? []) as string[];
+			return tags.some((tag) =>
+			{
+				const normalizedTag = String(tag).trim().replace(/^#+/, "").toLowerCase();
+				return normalizedTag === normalizedQuery || normalizedTag.startsWith(`${normalizedQuery}/`);
+			});
+		});
+	}
+
 	public searchParseFilters(queryString: string)
 	{
-		if (queryString.startsWith("?")) queryString = queryString.substring(1);
-		let filterName = queryString.split(":")[0];
-		if (!queryString.includes(":")) filterName = "";
-		const filterValue = filterName
-			? queryString.substring(filterName.length + 1).trim()
-			: queryString;
+		const parsed = this.parseQueryFilter(queryString);
+		const filterValue = parsed.value;
 
-		if (filterName == "content" || filterName == "text" || filterName == "body")
+		if (parsed.type === SearchType.Content)
 		{
 			this.search(filterValue, SearchType.Content);
 		}
-		else if (filterName == "title" || filterName == "name")
+		else if (parsed.type === SearchType.Title)
 		{
 			this.search(filterValue, SearchType.Title);
 		}
-		else if (filterName == "path")
+		else if (parsed.type === SearchType.Path)
 		{
 			this.search(filterValue, SearchType.Path);
 		}
-		else if (filterName == "header" || filterName == "headers")
+		else if (parsed.type === SearchType.Headers)
 		{
 			this.search(filterValue, SearchType.Headers);
 		}
-		else if (filterName == "tag" || filterName == "tags" || queryString.startsWith("#"))
+		else if (parsed.type === SearchType.Tags)
 		{
-			const tagQuery = queryString.startsWith("#")
-				? queryString
-				: `#${filterValue.replace(/^#+/, "")}`;
-			this.search(tagQuery, SearchType.Tags);
+			this.search(filterValue, SearchType.Tags);
 		}
-		else if (filterName == "alias" || filterName == "aliases")
+		else if (parsed.type === SearchType.Aliases)
 		{
 			this.search(filterValue, SearchType.Aliases);
 		}
 		else
 		{
-			this.search(queryString);
+			this.search(filterValue);
 		}
 	}
 
@@ -248,6 +264,70 @@ export class Search
 		return this;
 	}
 
+	public applyCurrentQueryToDocument()
+	{
+		const query = this.input?.value?.trim() ?? "";
+		if (query.length == 0)
+		{
+			this.clearCurrentDocumentSearch();
+			return;
+		}
+
+		const parsed = this.parseQueryFilter(query);
+		if (parsed.type === SearchType.Tags)
+		{
+			this.highlightTagInCurrentDocument(parsed.value);
+		}
+		else if (parsed.type === SearchType.Content)
+		{
+			this.searchCurrentDocument(parsed.value);
+		}
+		else
+		{
+			this.clearCurrentDocumentSearch();
+		}
+	}
+
+	private parseQueryFilter(queryString: string): { type: SearchType | null, value: string }
+	{
+		if (queryString.startsWith("?")) queryString = queryString.substring(1);
+		let filterName = queryString.split(":")[0];
+		if (!queryString.includes(":")) filterName = "";
+		const filterValue = filterName
+			? queryString.substring(filterName.length + 1).trim()
+			: queryString;
+
+		if (filterName == "content" || filterName == "text" || filterName == "body")
+		{
+			return { type: SearchType.Content, value: filterValue };
+		}
+		if (filterName == "title" || filterName == "name")
+		{
+			return { type: SearchType.Title, value: filterValue };
+		}
+		if (filterName == "path")
+		{
+			return { type: SearchType.Path, value: filterValue };
+		}
+		if (filterName == "header" || filterName == "headers")
+		{
+			return { type: SearchType.Headers, value: filterValue };
+		}
+		if (filterName == "tag" || filterName == "tags" || queryString.startsWith("#"))
+		{
+			const tagQuery = queryString.startsWith("#")
+				? queryString
+				: `#${filterValue.replace(/^#+/, "")}`;
+			return { type: SearchType.Tags, value: tagQuery };
+		}
+		if (filterName == "alias" || filterName == "aliases")
+		{
+			return { type: SearchType.Aliases, value: filterValue };
+		}
+
+		return { type: null, value: queryString };
+	}
+
 	private async searchCurrentDocument(query: string)
 	{
 		this.clearCurrentDocumentSearch();
@@ -269,7 +349,7 @@ export class Search
 				{
 					if (newNode.nodeType != Node.TEXT_NODE)
 					{
-						(newNode as Element)?.setAttribute('class', 'search-mark');
+						(newNode as Element)?.classList.add(Search.inlineMarkClass);
 					}
 					node?.parentNode?.insertBefore(newNode, node);
 				});
@@ -287,11 +367,40 @@ export class Search
 		}, 500);
 	}
 
+	private highlightTagInCurrentDocument(query: string)
+	{
+		this.clearCurrentDocumentSearch();
+		const normalizedQuery = query.trim().replace(/^#+/, "").toLowerCase();
+		if (normalizedQuery.length == 0) return;
+
+		const tagLinks = Array.from(
+			(ObsidianSite.document.sizerEl ?? ObsidianSite.document.documentEl)?.querySelectorAll("a.tag") ?? []
+		) as HTMLAnchorElement[];
+
+		const matches = tagLinks.filter((tagLink) =>
+		{
+			const tagText = (tagLink.textContent ?? "").trim().replace(/^#+/, "").toLowerCase();
+			return tagText === normalizedQuery || tagText.startsWith(`${normalizedQuery}/`);
+		});
+
+		matches.forEach((match) => match.classList.add(Search.tagMarkClass));
+
+		const firstMatch = matches[0];
+		setTimeout(() =>
+		{
+			if (firstMatch) ObsidianSite.scrollTo(firstMatch);
+		}, 300);
+	}
+
 	private clearCurrentDocumentSearch()
 	{
-		document.querySelectorAll(".search-mark").forEach(node => 
+		document.querySelectorAll(`.${Search.inlineMarkClass}`).forEach(node =>
 		{
 			node.outerHTML = node.innerHTML;
+		});
+		document.querySelectorAll(`.${Search.tagMarkClass}`).forEach((node) =>
+		{
+			node.classList.remove(Search.tagMarkClass);
 		});
 	}
 }

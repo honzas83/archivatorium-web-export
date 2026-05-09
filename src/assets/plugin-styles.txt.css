@@ -921,6 +921,13 @@ a.backlink:hover {
 	padding-left: 0.75em;
 }
 
+a.tag.search-tag-mark {
+	background-color: var(--text-highlight-bg);
+	color: var(--text-normal);
+	border-radius: var(--radius-s);
+	box-shadow: 0 0 0 1px var(--background-modifier-border-hover);
+}
+
 #tags .tree-item-children {
 	margin-left: 0.65em;
 	padding-left: 0.8em;

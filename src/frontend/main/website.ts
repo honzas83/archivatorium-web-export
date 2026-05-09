@@ -358,6 +358,7 @@ export class ObsidianWebsite {
 			this.onloadCallbacks.forEach((cb) => cb(page));
 
 			await page.show();
+			this.search?.applyCurrentQueryToDocument();
 
 			if (header) {
 				page.scrollToHeader(header);
