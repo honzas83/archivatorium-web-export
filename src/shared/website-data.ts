@@ -64,6 +64,14 @@ export interface WebpageData extends FileData
 	fullURL: string;
 }
 
+export interface TagTreeItemData
+{
+	name: string;
+	path: string;
+	count: number;
+	children: TagTreeItemData[];
+}
+
 export class WebsiteOptions
 {
 	/**
@@ -179,6 +187,7 @@ export class WebsiteData
 	themeName: string = "";
 	bodyClasses: string = "";
 	hasFavicon: boolean = false;
+	tagTree: TagTreeItemData[] = [];
 	featureOptions: WebsiteOptions = new WebsiteOptions();
 
 

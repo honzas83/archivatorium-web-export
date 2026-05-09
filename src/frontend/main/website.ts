@@ -162,8 +162,7 @@ export class ObsidianWebsite {
 				const insertTags =
 					doc.isMainDocument &&
 					!ObsidianSite.metadata.ignoreMetadata &&
-					ObsidianSite.metadata.featureOptions.tags.enabled &&
-					doc.documentType == DocumentType.Markdown;
+					ObsidianSite.metadata.featureOptions.tags.enabled;
 				const insertAliases =
 					doc.isMainDocument &&
 					!ObsidianSite.metadata.ignoreMetadata &&
@@ -197,29 +196,17 @@ export class ObsidianWebsite {
 
 				// ------------------ TAGS -----------------
 				if (insertTags) {
-					const tags: string[] = [];
-
-					if (ObsidianSite.metadata.featureOptions.tags.showInlineTags &&
-						doc.info.inlineTags
-					) {
-						tags.push(...doc.info.inlineTags);
-					}
-					if (ObsidianSite.metadata.featureOptions.tags
-						.showFrontmatterTags &&
-						doc.info.frontmatterTags
-					) {
-						tags.push(...doc.info.frontmatterTags);
-					}
+					const tagTree = ObsidianSite.metadata.tagTree ?? [];
 
 					if (!this.tags) {
-						this.tags = new Tags(tags);
+						this.tags = new Tags(tagTree);
 					} else {
 						this.tags?.modifyDependencies((d) => {
-							d.tags = tags;
+							d.tagTree = tagTree;
 						});
 					}
 
-					if (tags.length == 0) {
+					if (tagTree.length == 0) {
 						this.tags?.hide();
 					} else {
 						this.tags?.show();

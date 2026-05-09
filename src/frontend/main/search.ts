@@ -148,30 +148,36 @@ export class Search
 		if (queryString.startsWith("?")) queryString = queryString.substring(1);
 		let filterName = queryString.split(":")[0];
 		if (!queryString.includes(":")) filterName = "";
+		const filterValue = filterName
+			? queryString.substring(filterName.length + 1).trim()
+			: queryString;
 
 		if (filterName == "content" || filterName == "text" || filterName == "body")
 		{
-			this.search(queryString, SearchType.Content);
+			this.search(filterValue, SearchType.Content);
 		}
 		else if (filterName == "title" || filterName == "name")
 		{
-			this.search(queryString, SearchType.Title);
+			this.search(filterValue, SearchType.Title);
 		}
 		else if (filterName == "path")
 		{
-			this.search(queryString, SearchType.Path);
+			this.search(filterValue, SearchType.Path);
 		}
 		else if (filterName == "header" || filterName == "headers")
 		{
-			this.search(queryString, SearchType.Headers);
+			this.search(filterValue, SearchType.Headers);
 		}
 		else if (filterName == "tag" || filterName == "tags" || queryString.startsWith("#"))
 		{
-			this.search(queryString, SearchType.Tags);
+			const tagQuery = queryString.startsWith("#")
+				? queryString
+				: `#${filterValue.replace(/^#+/, "")}`;
+			this.search(tagQuery, SearchType.Tags);
 		}
 		else if (filterName == "alias" || filterName == "aliases")
 		{
-			this.search(queryString, SearchType.Aliases);
+			this.search(filterValue, SearchType.Aliases);
 		}
 		else
 		{

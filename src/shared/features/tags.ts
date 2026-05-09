@@ -23,9 +23,8 @@ export class TagsOptions extends InsertedFeatureOptionsWithTitle {
 		this.featureId = "tags";
 		this.displayTitle = "";
 		this.featurePlacement = new FeatureRelation(
-			".header .data-bar",
-			RelationType.End
+			"#right-sidebar-content",
+			RelationType.Start
 		);
 	}
 }
-

@@ -95,6 +95,7 @@ export class Webpage extends Attachment
 		output.pathToRoot = this.pathToRoot.path;
 		output.coverImageURL = this.coverImageURL ?? "";
 		output.allTags = this.allTags;
+		output.inlineTags = this.inlineTags;
 		output.frontmatterTags = this.frontmatterTags;
 		output.aliases = this.aliases;
 		output.backlinks = this.backlinks;

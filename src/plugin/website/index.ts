@@ -11,7 +11,7 @@ import HTMLExportPlugin from "src/plugin/main";
 import { AssetType } from "src/plugin/asset-loaders/asset-types";
 import RSS from 'rss';
 import { AssetLoader } from "src/plugin/asset-loaders/base-asset";
-import { FileData, WebpageData, WebsiteData } from "src/shared/website-data";
+import { FileData, TagTreeItemData, WebpageData, WebsiteData } from "src/shared/website-data";
 import { Utils } from "src/plugin/utils/utils";
 import { Shared } from "src/shared/shared";
 import { WebpageTemplate } from "./webpage-template";
@@ -160,6 +160,89 @@ export class Index
 				webpage.backlinks.remove(file);
 			}
 		}
+
+		this.websiteData.tagTree = this.buildTagTree();
+	}
+
+	private buildTagTree(): TagTreeItemData[]
+	{
+		interface MutableTagNode extends TagTreeItemData
+		{
+			childMap: Map<string, MutableTagNode>;
+		}
+
+		const rootNodes = new Map<string, MutableTagNode>();
+
+		const getOrCreateNode = (
+			nodeMap: Map<string, MutableTagNode>,
+			name: string,
+			path: string
+		): MutableTagNode =>
+		{
+			let node = nodeMap.get(name);
+			if (!node)
+			{
+				node = {
+					name,
+					path,
+					count: 0,
+					children: [],
+					childMap: new Map<string, MutableTagNode>(),
+				};
+				nodeMap.set(name, node);
+			}
+
+			return node;
+		};
+
+		for (const webpage of Object.values(this.websiteData.webpages))
+		{
+			const uniqueTags = new Set<string>();
+			if (this.exportOptions.tagOptions.showInlineTags)
+			{
+				(webpage.inlineTags ?? []).forEach((tag) => uniqueTags.add(tag));
+			}
+			if (this.exportOptions.tagOptions.showFrontmatterTags)
+			{
+				(webpage.frontmatterTags ?? []).forEach((tag) => uniqueTags.add(tag));
+			}
+
+			for (const rawTag of uniqueTags)
+			{
+				const normalizedTag = rawTag.trim().replace(/^#+/, "");
+				if (normalizedTag.length == 0) continue;
+
+				const parts = normalizedTag
+					.split("/")
+					.map((part) => part.trim())
+					.filter((part) => part.length > 0);
+				if (parts.length == 0) continue;
+
+				let currentMap = rootNodes;
+				let currentPath = "";
+				for (const part of parts)
+				{
+					currentPath = currentPath ? `${currentPath}/${part}` : part;
+					const node = getOrCreateNode(currentMap, part, currentPath);
+					node.count++;
+					currentMap = node.childMap;
+				}
+			}
+		}
+
+		const sortNodes = (nodeMap: Map<string, MutableTagNode>): TagTreeItemData[] =>
+		{
+			return Array.from(nodeMap.values())
+				.sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" }))
+				.map((node) => ({
+					name: node.name,
+					path: node.path,
+					count: node.count,
+					children: sortNodes(node.childMap),
+				}));
+		};
+
+		return sortNodes(rootNodes);
 	}
 
 	/**
