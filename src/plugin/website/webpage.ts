@@ -35,6 +35,8 @@ export class WebpageOutputData
 	public srcLinks: string[] = [];
 	public hrefLinks: string[] = [];
 	public linksToOtherFiles: string[] = [];
+	public metadataSearchText: string = "";
+	public metadataRedirectValues: string[] = [];
 }
 
 export class Webpage extends Attachment
@@ -106,6 +108,8 @@ export class Webpage extends Attachment
 		output.srcLinks = this.srcLinks;
 		output.hrefLinks = this.hrefLinks;
 		output.linksToOtherFiles = this.linksToOtherFiles;
+		output.metadataSearchText = this.metadataSearchText;
+		output.metadataRedirectValues = this.metadataRedirectValues;
 
 		this.data = output.html;
 
@@ -459,6 +463,70 @@ export class Webpage extends Attachment
 	{
 		const frontmatter = app.metadataCache.getFileCache(this.source)?.frontmatter ?? {};
 		return frontmatter;
+	}
+
+	private get metadataSearchText(): string
+	{
+		const values: string[] = [];
+		this.collectMetadataText(this.frontmatter, values);
+		return values.join(" ");
+	}
+
+	private get metadataRedirectValues(): string[]
+	{
+		const values: string[] = [];
+		this.collectMetadataValues(this.frontmatter, values);
+		return Array.from(new Set(values));
+	}
+
+	private collectMetadataText(value: any, values: string[], key: string = ""): void
+	{
+		if (key === "position") return;
+		if (key) values.push(key);
+
+		if (value == null) return;
+		if (Array.isArray(value))
+		{
+			value.forEach((item) => this.collectMetadataText(item, values));
+			return;
+		}
+		if (typeof value === "object")
+		{
+			Object.entries(value).forEach(([childKey, childValue]) => this.collectMetadataText(childValue, values, childKey));
+			return;
+		}
+
+		const text = String(value).trim();
+		if (!text) return;
+		values.push(text);
+
+		const normalized = this.normalizeMetadataValue(text);
+		if (normalized && normalized !== text.toLowerCase()) values.push(normalized);
+	}
+
+	private collectMetadataValues(value: any, values: string[]): void
+	{
+		if (value == null) return;
+		if (Array.isArray(value))
+		{
+			value.forEach((item) => this.collectMetadataValues(item, values));
+			return;
+		}
+		if (typeof value === "object")
+		{
+			Object.entries(value)
+				.filter(([key]) => key !== "position")
+				.forEach(([, childValue]) => this.collectMetadataValues(childValue, values));
+			return;
+		}
+
+		const normalized = this.normalizeMetadataValue(String(value));
+		if (normalized) values.push(normalized);
+	}
+
+	private normalizeMetadataValue(value: string): string
+	{
+		return value.toLowerCase().replace(/[^a-z0-9]/g, "");
 	}
 
 	private get srcLinks(): string[]

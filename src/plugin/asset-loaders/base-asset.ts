@@ -106,6 +106,8 @@ export class AssetLoader extends Attachment
                 return AssetHandler.fontPath;
             case AssetType.Other:
                 return AssetHandler.libraryPath;
+            case AssetType.Root:
+                return new Path("");
         }
     }
 

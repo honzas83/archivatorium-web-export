@@ -27,8 +27,8 @@ export class Index
 	private minisearchOptions = 
 	{
 		idField: 'path',
-		fields: ['title', 'aliases', 'headers', 'tags', 'path', 'content'],
-		storeFields: ['title', 'aliases', 'headers', 'tags', 'path'],
+		fields: ['title', 'metadata', 'aliases', 'headers', 'tags', 'path', 'content'],
+		storeFields: ['title', 'path'],
 		processTerm: (term:any, _fieldName:any) =>
 			this.stopWords.includes(term) ? null : term.toLowerCase()
 	}
@@ -82,6 +82,7 @@ export class Index
 			if (!this.websiteData.webpages) this.websiteData.webpages = {};
 			if (!this.websiteData.fileInfo) this.websiteData.fileInfo = {};
 			if (!this.websiteData.sourceToTarget) this.websiteData.sourceToTarget = {};
+			if (!this.websiteData.metadataValueToTarget) this.websiteData.metadataValueToTarget = {};
 			this.websiteData.featureOptions = 
 			{
 				backlinks: options.backlinkOptions,
@@ -90,6 +91,7 @@ export class Index
 				properties: options.propertiesOptions,
 				fileNavigation: options.fileNavigationOptions,
 				search: options.searchOptions,
+				shoppingBasket: options.shoppingBasketOptions,
 				outline: options.outlineOptions,
 				themeToggle: options.themeToggleOptions,
 				graphView: options.graphViewOptions,
@@ -158,6 +160,14 @@ export class Index
 			{
 				webpage.attachments.remove(file);
 				webpage.backlinks.remove(file);
+			}
+		}
+
+		if (!this.exportOptions.combineAsSingleFile)
+		{
+			for (const webpagePath of Object.keys(this.websiteData.webpages))
+			{
+				delete this.websiteData.fileInfo[webpagePath];
 			}
 		}
 
@@ -560,7 +570,22 @@ export class Index
 			
 
 			this.websiteData.webpages[webpageInfo.exportPath] = webpageInfo;
-			this.websiteData.fileInfo[webpageInfo.exportPath] = fileInfo;
+			if (!this.websiteData.metadataValueToTarget) this.websiteData.metadataValueToTarget = {};
+			for (const metadataValue of webpage.outputData.metadataRedirectValues)
+			{
+				if (!this.websiteData.metadataValueToTarget[metadataValue])
+				{
+					this.websiteData.metadataValueToTarget[metadataValue] = webpageInfo.exportPath;
+				}
+			}
+			if (this.exportOptions.combineAsSingleFile)
+			{
+				this.websiteData.fileInfo[webpageInfo.exportPath] = fileInfo;
+			}
+			else
+			{
+				delete this.websiteData.fileInfo[webpageInfo.exportPath];
+			}
 			this.websiteData.sourceToTarget[webpageInfo.sourcePath] = webpageInfo.exportPath;
 		}
 	}
@@ -581,11 +606,12 @@ export class Index
 
 			this.minisearch.add({
 				title: webpage.title,
+				metadata: webpage.outputData.metadataSearchText,
 				aliases: webpage.outputData.aliases,
 				headers: headers,
 				tags: webpage.outputData.allTags,
 				path: webpagePath,
-				content: webpage.outputData.description + " " + webpage.outputData.searchContent,
+				content: `${webpage.outputData.metadataSearchText} ${webpage.outputData.description} ${webpage.outputData.searchContent}`,
 			});
 		}
 	}
@@ -678,7 +704,7 @@ export class Index
 
 	public websiteDataAttachment(): Attachment
 	{
-		const websiteDataString = JSON.stringify(this.websiteData);
+		const websiteDataString = JSON.stringify(this.websiteData, Index.compactMetadataReplacer);
 		const websiteDataPath = AssetHandler.generateSavePath("metadata.json", AssetType.Other, this.website.destination);
 		return new Attachment(websiteDataString, websiteDataPath, null, this.exportOptions);
 	}
@@ -688,6 +714,13 @@ export class Index
 		const indexDataString = JSON.stringify(this.minisearch);
 		const indexDataPath = AssetHandler.generateSavePath("search-index.json", AssetType.Other, this.website.destination);
 		return new Attachment(indexDataString, indexDataPath, null, this.exportOptions);
+	}
+
+	private static compactMetadataReplacer(key: string, value: any)
+	{
+		if (key.startsWith("info_")) return undefined;
+		if (key == "data" && value == null) return undefined;
+		return value;
 	}
 
 }

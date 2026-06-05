@@ -122,6 +122,10 @@ export const language: i18n =
 			description: "Allows you search the vault, listing matching files and headers. (NOTE: this is only available for exports hosted on a web server)",
 			placeholder: "Search..."
 		},
+		shoppingBasket: {
+			title: "Shopping Basket",
+			description: "Allows hosted exports to collect search results and download selected original Markdown files from a companion server.",
+		},
 		linkPreview: {
 			title: "Link Previews",
 			description: "Show hover previews when you hover over internal links to other documents."

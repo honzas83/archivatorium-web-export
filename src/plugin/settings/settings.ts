@@ -62,6 +62,7 @@ export class Settings
 		Settings.exportOptions.graphViewOptions.setAvailable(true);
 		Settings.exportOptions.fileNavigationOptions.setAvailable(true);
 		Settings.exportOptions.searchOptions.setAvailable(true);
+		Settings.exportOptions.shoppingBasketOptions.unavailable = false;
 		Settings.exportOptions.rssOptions.setAvailable(true);
 		Settings.exportOptions.combineAsSingleFile = false;
 
@@ -80,6 +81,7 @@ export class Settings
 		Settings.exportOptions.graphViewOptions.setAvailable(true);
 		Settings.exportOptions.fileNavigationOptions.setAvailable(true);
 		Settings.exportOptions.searchOptions.setAvailable(false);
+		Settings.exportOptions.shoppingBasketOptions.setAvailable(false);
 		Settings.exportOptions.rssOptions.setAvailable(false);
 		Settings.exportOptions.combineAsSingleFile = true;
 
@@ -98,6 +100,7 @@ export class Settings
 		Settings.exportOptions.graphViewOptions.setAvailable(false);
 		Settings.exportOptions.fileNavigationOptions.setAvailable(false);
 		Settings.exportOptions.searchOptions.setAvailable(false);
+		Settings.exportOptions.shoppingBasketOptions.setAvailable(false);
 		Settings.exportOptions.rssOptions.setAvailable(false);
 		Settings.exportOptions.combineAsSingleFile = false;
 
@@ -214,6 +217,7 @@ export class SettingsPage extends PluginSettingTab
 		createFeatureSetting(section, lang.outline.title,			Settings.exportOptions.outlineOptions,			lang.outline.description);
 		createFeatureSetting(section, lang.graphView.title, 		Settings.exportOptions.graphViewOptions,		lang.graphView.description);
 		createFeatureSetting(section, lang.search.title,			Settings.exportOptions.searchOptions,			lang.search.description);
+		createFeatureSetting(section, lang.shoppingBasket.title,	Settings.exportOptions.shoppingBasketOptions,	lang.shoppingBasket.description);
 		createFeatureSetting(section, lang.linkPreview.title,		Settings.exportOptions.linkPreviewOptions,		lang.linkPreview.description);
 		createFeatureSetting(section, lang.themeToggle.title,		Settings.exportOptions.themeToggleOptions,		lang.themeToggle.description);
 		createFeatureSetting(section, lang.customHead.title,		Settings.exportOptions.customHeadOptions,		lang.customHead.description);

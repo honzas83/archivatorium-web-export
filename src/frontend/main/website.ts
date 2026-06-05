@@ -26,6 +26,7 @@ import {
 import { BacklinkList } from "./backlinks";
 import { Tags } from "./tags";
 import { Aliases } from "./aliases";
+import { ShoppingBasket } from "./shopping-basket";
 
 type Constructor<T> = new () => T;
 
@@ -61,6 +62,7 @@ export class ObsidianWebsite {
 	public backlinkList: BacklinkList | undefined = undefined;
 	public tags: Tags | undefined = undefined;
 	public aliases: Aliases | undefined = undefined;
+	public shoppingBasket: ShoppingBasket | undefined = undefined;
 
 	public entryPage: string;
 
@@ -127,11 +129,20 @@ export class ObsidianWebsite {
 		if (leftSidebarEl) this.leftSidebar = new Sidebar(leftSidebarEl);
 		if (rightSidebarEl) this.rightSidebar = new Sidebar(rightSidebarEl);
 		this.search = await new Search().init();
+		if (
+			this.search &&
+			this.isHttp &&
+			this.metadata.featureOptions.shoppingBasket?.enabled !== false
+		) {
+			this.shoppingBasket = new ShoppingBasket(this.search);
+		}
 
-		const pathname =
+		const requestedPathname = LinkHandler.getPathnameFromURL(window.location.pathname);
+		const metadataPathname =
 			document
 				.querySelector("meta[name='pathname']")
 				?.getAttribute("content") ?? "unknown";
+		const pathname = this.resolveWebpagePath(requestedPathname) ?? metadataPathname;
 		this.entryPage = pathname;
 
 		this.document = await new ObsidianDocument(pathname);
@@ -286,6 +297,7 @@ export class ObsidianWebsite {
 		const header = LinkHandler.getHashFromURL(url);
 		const query = LinkHandler.getQueryFromURL(url);
 		url = LinkHandler.getPathnameFromURL(url);
+		url = this.resolveWebpagePath(url) ?? url;
 		console.log("Loading URL", url, header, query);
 
 		if (query && query.startsWith("query=")) {
@@ -394,10 +406,24 @@ export class ObsidianWebsite {
 	public documentExists(url: string): boolean {
 		url = LinkHandler.getPathnameFromURL(url);
 		if (this.isHttp) {
-			return !!this.metadata.webpages[url];
+			return !!this.resolveWebpagePath(url);
 		} else {
 			return !!this.getFileData(url)?.data;
 		}
+	}
+
+	private resolveWebpagePath(url: string): string | undefined {
+		const cleanURL = LinkHandler.getPathnameFromURL(url).replace(/^\/+/, "");
+		if (!cleanURL) return this.metadata?.webpages["index.html"] ? "index.html" : undefined;
+		if (this.metadata?.webpages[cleanURL]) return cleanURL;
+
+		const withoutHTML = cleanURL.replace(/\.html$/i, "");
+		const metadataValue = this.normalizeMetadataValue(withoutHTML);
+		return this.metadata?.metadataValueToTarget?.[metadataValue];
+	}
+
+	private normalizeMetadataValue(value: string): string {
+		return value.toLowerCase().replace(/[^a-z0-9]/g, "");
 	}
 
 	private async loadWebsiteData(): Promise<WebsiteData | undefined> {

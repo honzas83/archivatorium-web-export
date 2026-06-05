@@ -115,6 +115,10 @@ export const language: i18n =
 			description: "Permette di cercare nel vault, elencando file e titoli corrispondenti. (NOTA: disponibile solo per esportazioni su un server web)",
 			placeholder: "Cerca..."
 		},
+		shoppingBasket: {
+			title: "Shopping Basket",
+			description: "Allows hosted exports to collect search results and download selected original Markdown files from a companion server.",
+		},
 		linkPreview: {
 			title: "Anteprime dei Collegamenti",
 			description: "Mostra anteprime al passaggio del mouse sui collegamenti interni ad altri documenti."

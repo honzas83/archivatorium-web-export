@@ -2,6 +2,7 @@ import { Shared } from "src/shared/shared";
 import { LinkHandler } from "./links";
 import { getTextNodes } from "./utils";
 import MiniSearch, { SearchResult } from "minisearch";
+import { WebpageData } from "src/shared/website-data";
 
 export enum SearchType
 {
@@ -11,9 +12,23 @@ export enum SearchType
 	Tags = 8,
 	Path = 16,
 	Content = 32,
+	Metadata = 64,
 }
 
-const allSearch = SearchType.Title | SearchType.Aliases | SearchType.Headers | SearchType.Tags | SearchType.Path | SearchType.Content;
+const allSearch = SearchType.Title | SearchType.Aliases | SearchType.Headers | SearchType.Tags | SearchType.Path | SearchType.Content | SearchType.Metadata;
+
+export interface BasketSearchItem
+{
+	exportPath: string;
+	sourcePath: string;
+	title: string;
+}
+
+export interface BasketSearchSnapshot
+{
+	query: string;
+	items: BasketSearchItem[];
+}
 
 export class Search
 {
@@ -46,29 +61,7 @@ export class Search
 			this.input.style.color = "";
 		}
 
-		const searchFields: string[] = [];
-		if (type & SearchType.Title) searchFields.push('title');
-		if (type & SearchType.Aliases) searchFields.push('aliases');
-		if (type & SearchType.Headers) searchFields.push('headers');
-		if (type & SearchType.Tags) searchFields.push('tags');
-		if (type & SearchType.Path) searchFields.push('path');
-		if (type & SearchType.Content) searchFields.push('content');
-
-		console.log(type & SearchType.Title, type & SearchType.Aliases, type & SearchType.Headers, type & SearchType.Tags, type & SearchType.Path, type & SearchType.Content);
-	
-		
-		let results: Array<SearchResult> = this.index.search(query,
-		{ 
-			prefix: true, 
-			fuzzy: 0.2, 
-			boost: { title: 2, aliases: 1.8, headers: 1.5, tags: 1.3, path: 1.1 }, 
-			fields: searchFields 
-		});
-
-		if (type === SearchType.Tags)
-		{
-			results = this.filterTagResults(results, query);
-		}
+		let results = this.runSearchQuery(query, type);
 
 		console.log("Search results", results);
 
@@ -80,11 +73,14 @@ export class Search
 		const headerLinks: Map<string, string[]> = new Map();
 		for (const result of results)
 		{
+			const resultPath = this.getResultPath(result);
+			if (!resultPath) continue;
+
 			// only show the most relevant results
 			if ((result.score < results[0].score * 0.30 && showPaths.length > 4) || result.score < results[0].score * 0.1) 
 				break;
 
-			showPaths.push(result.path);
+			showPaths.push(resultPath);
 
 			// generate matching header links to display under the search result
 			if(query.length > 2)
@@ -95,7 +91,7 @@ export class Search
 				{
 					if (result.match[match].includes("headers"))
 					{
-						for (const header of result.headers)
+						for (const header of this.getResultHeaders(result))
 						{
 							if (header.toLowerCase().includes(match.toLowerCase()))
 							{
@@ -112,7 +108,7 @@ export class Search
 					if (breakEarly) break;
 				}
 
-				headerLinks.set(result.path, headers);
+				headerLinks.set(resultPath, headers);
 			}
 		}
 
@@ -127,18 +123,19 @@ export class Search
 		if (!ObsidianSite.fileTree)
 		{
 			const list = document.createElement('div');
-			results.filter((result: any) => result.path.endsWith(".html"))
+			results.filter((result: any) => this.getResultPath(result).endsWith(".html"))
 					.slice(0, 20).forEach((result: any) => 
 					{
+						const resultPath = this.getResultPath(result);
 						const item = document.createElement('div');
 						item.classList.add('search-result');
 
 						const link = document.createElement('a');
 						link.classList.add('tree-item-self');
 
-						const searchURL = result.path + '?mark=' + encodeURIComponent(query);
+						const searchURL = resultPath + '?mark=' + encodeURIComponent(query);
 						link.setAttribute('href', searchURL);
-						link.appendChild(document.createTextNode(result.title));
+						link.appendChild(document.createTextNode(this.getResultTitle(result)));
 						item.appendChild(link);
 						list.append(item);
 					});
@@ -157,13 +154,123 @@ export class Search
 
 		return results.filter((result: any) =>
 		{
-			const tags = (result.tags ?? []) as string[];
+			const tags = this.getResultTags(result);
 			return tags.some((tag) =>
 			{
 				const normalizedTag = String(tag).trim().replace(/^#+/, "").toLowerCase();
 				return normalizedTag === normalizedQuery || normalizedTag.startsWith(`${normalizedQuery}/`);
 			});
 		});
+	}
+
+	public getContainer(): HTMLElement | undefined
+	{
+		return this.container;
+	}
+
+	public getCurrentQuery(): string
+	{
+		return this.input?.value?.trim() ?? "";
+	}
+
+	public getMatchesForQuery(queryString: string): BasketSearchSnapshot
+	{
+		const parsed = this.parseQueryFilter(queryString);
+		const type = parsed.type ?? allSearch;
+		const results = this.runSearchQuery(parsed.value, type);
+		const seen = new Set<string>();
+		const items: BasketSearchItem[] = [];
+
+		for (const result of results)
+		{
+			const exportPath = this.getResultPath(result);
+			const webpage = this.getResultWebpage(result);
+			const sourcePath = webpage?.sourcePath ?? "";
+
+			if (!exportPath || !sourcePath || seen.has(sourcePath)) continue;
+			seen.add(sourcePath);
+			items.push({
+				exportPath,
+				sourcePath,
+				title: this.getResultTitle(result),
+			});
+		}
+
+		return {
+			query: queryString,
+			items,
+		};
+	}
+
+	private runSearchQuery(query: string, type: SearchType): Array<SearchResult>
+	{
+		const searchFields: string[] = [];
+		if (type & SearchType.Title) searchFields.push('title');
+		if (type & SearchType.Aliases) searchFields.push('aliases');
+		if (type & SearchType.Headers) searchFields.push('headers');
+		if (type & SearchType.Tags) searchFields.push('tags');
+		if (type & SearchType.Path) searchFields.push('path');
+		if (type & SearchType.Content) searchFields.push('content');
+		if (type & SearchType.Metadata) searchFields.push('metadata');
+
+		console.log(type & SearchType.Title, type & SearchType.Aliases, type & SearchType.Headers, type & SearchType.Tags, type & SearchType.Path, type & SearchType.Content, type & SearchType.Metadata);
+		const searchQuery = this.expandMetadataQuery(query);
+
+		let results: Array<SearchResult> = this.index.search(searchQuery,
+		{
+			prefix: true,
+			fuzzy: false,
+			boost: { metadata: 8, title: 2, aliases: 1.8, headers: 1.5, tags: 1.3, path: 1.1 },
+			fields: searchFields
+		});
+
+		if (type === SearchType.Tags)
+		{
+			results = this.filterTagResults(results, query);
+		}
+
+		return results;
+	}
+
+	private getResultPath(result: any): string
+	{
+		return String(result.path ?? result.id ?? "");
+	}
+
+	private getResultWebpage(result: any): WebpageData | undefined
+	{
+		const path = this.getResultPath(result);
+		return path ? ObsidianSite.getWebpageData(path) : undefined;
+	}
+
+	private getResultTitle(result: any): string
+	{
+		return String(result.title ?? this.getResultWebpage(result)?.title ?? this.getResultPath(result));
+	}
+
+	private getResultHeaders(result: any): string[]
+	{
+		const storedHeaders = result.headers as string[] | undefined;
+		if (storedHeaders) return storedHeaders;
+		return this.getResultWebpage(result)?.headers?.map((header) => header.heading) ?? [];
+	}
+
+	private getResultTags(result: any): string[]
+	{
+		const storedTags = result.tags as string[] | undefined;
+		if (storedTags) return storedTags;
+		const webpage = this.getResultWebpage(result);
+		return [
+			...(webpage?.inlineTags ?? []),
+			...(webpage?.frontmatterTags ?? []),
+		];
+	}
+
+	private expandMetadataQuery(query: string): string
+	{
+		const normalized = query.toLowerCase().replace(/[^a-z0-9]/g, "");
+		if (!/[a-z]/i.test(query) || !/\d/.test(query) || normalized === query.toLowerCase()) return query;
+		return normalized;
 	}
 
 	public searchParseFilters(queryString: string)
@@ -229,7 +336,7 @@ export class Search
 		try
 		{
 			// @ts-ignore
-			this.index = MiniSearch.loadJS(indexJSON, { fields: ['title', 'path', 'tags', 'headers'] });
+			this.index = MiniSearch.loadJS(indexJSON, { fields: ['title', 'metadata', 'aliases', 'headers', 'tags', 'path', 'content'] });
 		}
 		catch (e)
 		{
@@ -278,7 +385,7 @@ export class Search
 		{
 			this.highlightTagInCurrentDocument(parsed.value);
 		}
-		else if (parsed.type === SearchType.Content)
+		else if (parsed.type === SearchType.Content || parsed.type === null)
 		{
 			this.searchCurrentDocument(parsed.value);
 		}
@@ -331,12 +438,17 @@ export class Search
 	private async searchCurrentDocument(query: string)
 	{
 		this.clearCurrentDocumentSearch();
+		const normalizedQuery = query.trim();
+		if (normalizedQuery.length == 0) return;
+
+		const escapedQuery = normalizedQuery.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+		const queryPattern = new RegExp(escapedQuery, 'gi');
 		const textNodes = getTextNodes(ObsidianSite.document.sizerEl ?? ObsidianSite.document.documentEl);
 
 		textNodes.forEach(async (node) =>
 		{
 			const content = node.nodeValue;
-			const newContent = content?.replace(new RegExp(query, 'gi'), match => `<mark>${match}</mark>`);
+			const newContent = content?.replace(queryPattern, match => `<mark>${match}</mark>`);
 
 			if (newContent && newContent !== content) 
 			{

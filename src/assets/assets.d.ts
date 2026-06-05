@@ -8,7 +8,22 @@ declare module "*.txt.css" {
     export default value
 }
 
+declare module "*.txt.mjs" {
+    const value: string
+    export default value
+}
+
+declare module "*.txt.json" {
+    const value: string
+    export default value
+}
+
 declare module "*.txt" {
+    const value: string
+    export default value
+}
+
+declare module "*?raw" {
     const value: string
     export default value
 }
@@ -23,4 +38,3 @@ declare module "*.png" {
     const value: Uint8Array
     export default value
 }
-

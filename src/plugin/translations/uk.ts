@@ -120,6 +120,10 @@ export const language: i18n =
 			description: "Дозволяє шукати у сховищі, показуючи відповідні файли та заголовки. (ПРИМІТКА: доступно лише для експортів, розміщених на веб-сервері)",
 			placeholder: "Пошук..."
 		},
+		shoppingBasket: {
+			title: "Shopping Basket",
+			description: "Allows hosted exports to collect search results and download selected original Markdown files from a companion server.",
+		},
 		linkPreview: {
 			title: "Попередній перегляд посилань",
 			description: "Показувати попередній перегляд при наведенні на внутрішні посилання до інших документів."

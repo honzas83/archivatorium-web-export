@@ -10,6 +10,7 @@ import { PropertiesOptions } from "./features/properties";
 import { RssOptions } from "./features/rss";
 import { SearchOptions } from "./features/search";
 import { SidebarOptions } from "./features/sidebar";
+import { ShoppingBasketOptions } from "./features/shopping-basket";
 import { TagsOptions } from "./features/tags";
 import { ThemeToggleOptions } from "./features/theme-toggle";
 
@@ -105,6 +106,11 @@ export class WebsiteOptions
 	search: SearchOptions;
 
 	/**
+	 * The options for the shopping basket checkout feature.
+	 */
+	shoppingBasket: ShoppingBasketOptions;
+
+	/**
 	 * The options for the outline feature.
 	 */
 	outline: OutlineOptions;
@@ -153,6 +159,7 @@ export class WebsiteOptions
 		data.properties = Object.assign(new PropertiesOptions(), data.properties);
 		data.fileNavigation = Object.assign(new FileNavigationOptions(), data.fileNavigation);
 		data.search = Object.assign(new SearchOptions(), data.search);
+		data.shoppingBasket = Object.assign(new ShoppingBasketOptions(), data.shoppingBasket);
 		data.outline = Object.assign(new OutlineOptions(), data.outline);
 		data.themeToggle = Object.assign(new ThemeToggleOptions(), data.themeToggle);
 		data.graphView = Object.assign(new GraphViewOptions(), data.graphView);
@@ -172,6 +179,7 @@ export class WebsiteData
 	webpages: {[targetPath: string]: WebpageData} = {};
 	fileInfo: {[targetPath: string]: FileData} = {};
 	sourceToTarget: {[sourcePath: string]: string} = {};
+	metadataValueToTarget: {[metadataValue: string]: string} = {};
 	attachments: string[] = [];
 	shownInTree: string[] = [];
 	allFiles: string[] = [];
@@ -195,6 +203,7 @@ export class WebsiteData
 	{
 		let data = Object.assign(new WebsiteData(), JSON.parse(json));
 		data.featureOptions = WebsiteOptions.fromJSON(JSON.stringify(data.featureOptions));
+		data.metadataValueToTarget = data.metadataValueToTarget ?? {};
 		return data;
 	}
 }

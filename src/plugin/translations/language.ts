@@ -126,6 +126,10 @@ export interface i18n
 			description: string;
 			placeholder: string;
 		},
+		shoppingBasket: {
+			title: string;
+			description: string;
+		},
 		linkPreview: {
 			title: string;
 			description: string;

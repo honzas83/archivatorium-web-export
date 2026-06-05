@@ -14,6 +14,7 @@ import { CustomHeadOptions } from "src/shared/features/custom-head";
 import { MarkdownRendererOptions } from "src/plugin/render-api/api-options";
 import { RssOptions } from "src/shared/features/rss";
 import { LinkPreviewOptions } from "src/shared/features/link-preview";
+import { ShoppingBasketOptions } from "src/shared/features/shopping-basket";
 
 export class ExportPipelineOptions extends MarkdownRendererOptions
 {
@@ -64,6 +65,11 @@ export class ExportPipelineOptions extends MarkdownRendererOptions
 	 * The options for the search feature.
 	 */
 	searchOptions: SearchOptions = new SearchOptions();
+
+	/**
+	 * The options for the shopping basket checkout feature.
+	 */
+	shoppingBasketOptions: ShoppingBasketOptions = new ShoppingBasketOptions();
 
 	/**
 	 * The options for the outline feature.
@@ -239,5 +245,4 @@ export class ExportPipelineOptions extends MarkdownRendererOptions
 		}
 	}
 }
-
 

@@ -121,6 +121,10 @@ export const language: i18n =
 			description: "Permite pesquisar no cofre, listando arquivos e cabeçalhos correspondentes. (NOTA: disponível apenas em exportações hospedadas na web)",
 			placeholder: "Pesquisar..."
 		},
+		shoppingBasket: {
+			title: "Shopping Basket",
+			description: "Allows hosted exports to collect search results and download selected original Markdown files from a companion server.",
+		},
 		linkPreview: {
 			title: "Pré-visualizações de Links",
 			description: "Mostrar pré-visualizações ao passar o mouse sobre links internos para outros documentos."

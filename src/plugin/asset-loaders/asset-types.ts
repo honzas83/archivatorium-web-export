@@ -5,7 +5,8 @@ export enum AssetType
     Media = "media", // images, videos, audio, etc
     HTML = "html", // reusable html
     Font = "font", // fonts
-    Other = "other" // anything else
+    Other = "other", // anything else
+    Root = "root" // saved relative to the export root
 }
 
 export enum InlinePolicy

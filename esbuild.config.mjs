@@ -67,6 +67,20 @@ const regexReplacementPlugin = {
   }
 };
 
+const rawImportPlugin = {
+  name: 'raw-import',
+  setup(build) {
+    build.onResolve({ filter: /\?raw$/ }, args => ({
+      path: path.resolve(args.resolveDir, args.path.replace(/\?raw$/, "")),
+      namespace: 'raw-import',
+    }));
+    build.onLoad({ filter: /.*/, namespace: 'raw-import' }, async args => ({
+      contents: await fs.promises.readFile(args.path, 'utf8'),
+      loader: 'text',
+    }));
+  }
+};
+
 // First build
 await esbuild.build({
   entryPoints: ["src/frontend/main/index.txt.ts"],
@@ -92,9 +106,13 @@ await esbuild.build({
   loader: {
     '.txt.js': 'text',
     '.txt.css': 'text',
+    '.txt.mjs': 'text',
+    '.txt.json': 'text',
+    '.txt': 'text',
     '.wasm': 'binary',
     '.png': 'binary',
   },
+  plugins: [rawImportPlugin],
   banner: {
     js: banner,
   },

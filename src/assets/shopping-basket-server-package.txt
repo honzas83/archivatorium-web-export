@@ -1,0 +1,7 @@
+{
+  "name": "obsidian-webpage-export-shopping-basket-server",
+  "private": true,
+  "type": "module",
+  "description": "Companion server for Obsidian Webpage Export shopping basket checkout.",
+  "dependencies": {}
+}
