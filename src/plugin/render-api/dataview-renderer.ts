@@ -1,9 +1,20 @@
 import { MarkdownPreviewView, TFile } from "obsidian";
-import { DataviewApi, getAPI } from "obsidian-dataview";
+
+interface DataviewApi {
+	settings?: {
+		dataviewJsKeyword?: string;
+	};
+	execute(query: string, container: HTMLElement, component: MarkdownPreviewView, sourcePath: string): Promise<unknown>;
+	executeJs(query: string, container: HTMLElement, component: MarkdownPreviewView, sourcePath: string): Promise<unknown>;
+}
+
+function getAPI(): DataviewApi | undefined {
+	return (window as Window & { DataviewAPI?: DataviewApi }).DataviewAPI;
+}
 
 export class DataviewRenderer
 {
-	public static api: DataviewApi = getAPI();
+	public static api: DataviewApi | undefined = getAPI();
 	public static readonly jsKeyword = DataviewRenderer.api?.settings?.dataviewJsKeyword ?? "dataviewjs";
 
 	public view: MarkdownPreviewView;
@@ -31,15 +42,21 @@ export class DataviewRenderer
 		this.query = query;
 		this.keyword = keyword;
 		DataviewRenderer.api = getAPI();
+		if (!DataviewRenderer.api) {
+			throw new Error("Dataview API is not available.");
+		}
 	}
 
 	public async generate(container?: HTMLElement): Promise<HTMLElement>
 	{
 		this.container = container ?? document.body;
+		const api = DataviewRenderer.api;
+		if (!api) throw new Error("Dataview API is not available.");
+
 		if (this.keyword == "dataview") 
-			await DataviewRenderer.api.execute(this.query, container, this.view, this.file.path);
+			await api.execute(this.query, this.container, this.view, this.file.path);
 		else
-			await DataviewRenderer.api.executeJs(this.query, container, this.view, this.file.path);
+			await api.executeJs(this.query, this.container, this.view, this.file.path);
 
 		function delay(ms: number) {
 			return new Promise( resolve => setTimeout(resolve, ms) );
@@ -64,4 +81,3 @@ export class DataviewRenderer
 		return results;
 	}
 }
-

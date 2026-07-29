@@ -1,5 +1,5 @@
-name: "Export Obsidian vault to HTML"
-description: "Exports the Obsidian vault to HTML"
+name: "Export Archivatorium vault to HTML"
+description: "Exports an Archivatorium vault to a searchable HTML archive"
 
 inputs:
   vault:
@@ -33,9 +33,9 @@ runs:
         mkdir -p ./.output
 
         if [ -z "${{ inputs.config }}" ]; then
-          docker run --rm -v ${{ inputs.vault }}:/vault -v ./.output:/output KosmosisDire/obsidian-webpage-export:${{ inputs.version }} >> ./.log.txt
+          docker run --rm -v ${{ inputs.vault }}:/vault -v ./.output:/output ghcr.io/honzas83/archivatorium-web-export:${{ inputs.version }} >> ./.log.txt
         else
-          docker run --rm -v ${{ inputs.vault }}:/vault -v ${{ inputs.config }}:/config.json -v ./.output:/output KosmosisDire/obsidian-webpage-export:${{ inputs.version }} >> ./.log.txt
+          docker run --rm -v ${{ inputs.vault }}:/vault -v ${{ inputs.config }}:/config.json -v ./.output:/output ghcr.io/honzas83/archivatorium-web-export:${{ inputs.version }} >> ./.log.txt
         fi
 
         cat ./.log.txt

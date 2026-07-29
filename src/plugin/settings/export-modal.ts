@@ -312,7 +312,7 @@ export class ExportModal extends Modal
 			//@ts-ignore
 			app.setting.open();
 			//@ts-ignore
-			app.setting.openTabById('webpage-html-export');
+			app.setting.openTabById('archivatorium-web-export');
 		}));
 
 		await Utils.waitUntil(() => this.isClosed, 60 * 60 * 1000, 10);

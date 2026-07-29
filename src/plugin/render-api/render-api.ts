@@ -1,7 +1,6 @@
 import { MarkdownRendererOptions } from "./api-options";
 import { Component, Notice, WorkspaceLeaf, MarkdownRenderer as ObsidianRenderer, MarkdownPreviewView, loadMermaid, TFile, MarkdownView, View, MarkdownPreviewRenderer, TAbstractFile, TFolder, Setting } from "obsidian";
 import { TabManager } from "src/plugin/utils/tab-manager";
-import * as electron from 'electron';
 import { Settings, SettingsPage } from "src/plugin/settings/settings";
 import { Path } from "src/plugin/utils/path";
 import { SimpleFileListGenerator } from "src/plugin/features/simple-list-generator";
@@ -10,6 +9,13 @@ import { AssetLoader } from "../asset-loaders/base-asset";
 import { AssetType } from "../asset-loaders/asset-types";
 import { IconHandler } from "../utils/icon-handler";
 import { AssetHandler } from "../asset-loaders/asset-handler";
+
+interface ElectronWindowHandle {
+	webContents: {
+		setBackgroundThrottling(enabled: boolean): void;
+	};
+	setProgressBar(progress: number): void;
+}
 
 export namespace MarkdownRendererAPI {
 	export const viewableMediaExtensions = ["png", "jpg", "jpeg", "svg", "gif", "bmp", "ico", "mp4", "mov", "avi", "webm", "mpeg", "mp3", "wav", "ogg", "aac", "pdf", "html", "htm", "json", "txt", "yaml"];
@@ -100,7 +106,7 @@ export namespace MarkdownRendererAPI {
 export namespace _MarkdownRendererInternal {
 	export let overlayProgress: boolean = true;
 	export let renderLeaf: WorkspaceLeaf | undefined;
-	export let electronWindow: electron.BrowserWindow | undefined;
+	export let electronWindow: ElectronWindowHandle | undefined;
 	export let errorInBatch: boolean = false;
 	export let cancelled: boolean = false;
 	export let batchStarted: boolean = false;
@@ -173,6 +179,31 @@ export namespace _MarkdownRendererInternal {
 			`${reason} Using the fallback renderer only for ${file.name}.`,
 			"Switching renderer"
 		);
+	}
+
+	async function prepareRenderer(renderer: any, file: TFile | undefined): Promise<void> {
+		const operations = [
+			{ name: "unfold headings", run: () => renderer.unfoldAllHeadings() },
+			{ name: "unfold lists", run: () => renderer.unfoldAllLists() },
+			{ name: "parse sections", run: () => renderer.parseSync() },
+		];
+
+		for (const operation of operations) {
+			try {
+				await operation.run();
+			} catch (error) {
+				const message = error instanceof Error ? error.message : String(error);
+				const context = file?.path ?? "custom markdown";
+				if (error instanceof RangeError && message.includes("Maximum call stack size exceeded")) {
+					ExportLog.warning(
+						`Renderer could not ${operation.name} in ${context}: ${message}. Continuing with the sections already available.`
+					);
+					continue;
+				}
+
+				ExportLog.error(error, `Renderer failed to ${operation.name} in ${context}.`);
+			}
+		}
 	}
 
 	export async function renderFile(file: TFile, options: MarkdownRendererOptions): Promise<{ contentEl: HTMLElement, viewType: string } | undefined> {
@@ -274,14 +305,7 @@ export namespace _MarkdownRendererInternal {
 		// @ts-ignore
 		const renderer = preview.renderer;
 
-		try {
-			await renderer.unfoldAllHeadings();
-			await renderer.unfoldAllLists();
-			await renderer.parseSync();
-		}
-		catch (e) {
-			ExportLog.error(e, "Failed to unfold or parse renderer!");
-		}
+		await prepareRenderer(renderer, preview.file);
 
 		// @ts-ignore
 		if (!window.mermaid) {
@@ -439,13 +463,7 @@ export namespace _MarkdownRendererInternal {
 		// @ts-ignore
 		const renderer: any = preview.renderer;
 
-		try {
-			await renderer.unfoldAllHeadings();
-			await renderer.unfoldAllLists();
-			await renderer.parseSync();
-		} catch (e) {
-			ExportLog.error(e, "Failed to unfold or parse renderer!");
-		}
+		await prepareRenderer(renderer, preview.file);
 
 		// @ts-ignore
 		if (!window.mermaid) {
@@ -1258,7 +1276,7 @@ export namespace _MarkdownRendererInternal {
 
 		const obsidianWindow = renderLeaf.view.containerEl.win;
 		// @ts-ignore
-		electronWindow = obsidianWindow.electronWindow as electron.BrowserWindow;
+		electronWindow = obsidianWindow.electronWindow as ElectronWindowHandle;
 		electronWindow.webContents.setBackgroundThrottling(false);
 
 		document.body.classList.add("html-export-running");

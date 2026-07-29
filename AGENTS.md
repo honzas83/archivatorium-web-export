@@ -9,4 +9,4 @@
 /Users/honzas/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node /opt/homebrew/lib/node_modules/npm/bin/npm-cli.js run dev
 ```
 
-- If `npm install` appears to succeed but packages like `esbuild`, `electron`, or `tslib` are missing or invalid, check which Node version is running first.
+- If `npm install` appears to succeed but packages like `esbuild` or `tslib` are missing or invalid, check which Node version is running first.

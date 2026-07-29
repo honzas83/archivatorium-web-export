@@ -1,10 +1,13 @@
 #!/bin/bash
 
-PLUGIN_DIR="/vault/.obsidian/plugins/webpage-html-export"
-if [[ ! -d "$PLUGIN_DIR" ]]; then
-  # Copy the plugin to the vault if it doesn't exist
-  mkdir -p "$PLUGIN_DIR"
-  cp /plugin/* "$PLUGIN_DIR/"
+PLUGIN_DIR="/vault/.obsidian/plugins/archivatorium-web-export"
+mkdir -p "$PLUGIN_DIR"
+
+# Always run the plugin bundled into this image while preserving vault settings.
+cp /plugin/main.js /plugin/manifest.json /plugin/styles.css "$PLUGIN_DIR/"
+
+if [[ -f /config.json ]]; then
+  cp /config.json "$PLUGIN_DIR/data.json"
 fi
 
 RUST_LOG=debug xvfb-run electron-injector \

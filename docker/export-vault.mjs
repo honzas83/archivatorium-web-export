@@ -6,8 +6,8 @@ console.log('Starting export script...');
 		await this.app.plugins.setEnable(true);
 
 		console.log('Enabling export plugin...');
-		await this.app.plugins.enablePlugin('webpage-html-export');
-		const plugin = await this.app.plugins.getPlugin('webpage-html-export');
+		await this.app.plugins.enablePlugin('archivatorium-web-export');
+		const plugin = await this.app.plugins.getPlugin('archivatorium-web-export');
 
 		if (process.env.EXPORT_ENTIRE_VAULT) {
 			console.log('Exporting entire vault...');

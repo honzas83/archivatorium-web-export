@@ -161,13 +161,11 @@ export class SettingsPage extends PluginSettingTab
 		const supportContainer = container.createDiv();
 		supportContainer.style.marginBottom = '15px';
 		const supportLink = container.createEl('a');
-		const buttonColor = "3ebba4";
-		const buttonTextColor = "ffffff";
-		// @ts-ignore
-		supportLink.href = `https://www.buymeacoffee.com/nathangeorge`;
-		supportLink.style.height = "40px"
-		supportLink.innerHTML = `<img style="height:40px;" src="https://img.buymeacoffee.com/button-api/?text=Buy me a coffee&emoji=&slug=nathangeorge&button_colour=${buttonColor}&font_colour=${buttonTextColor}&font_family=Poppins&outline_colour=${buttonTextColor}&coffee_colour=FFDD00">`;
-		const supportHeader = container.createDiv({ text: lang.support, cls: "setting-item-description" });
+		supportLink.href = "https://honzas.cz";
+		supportLink.textContent = "honzas.cz";
+		supportLink.target = "_blank";
+		supportLink.rel = "noopener noreferrer";
+		const supportHeader = container.createDiv({ text: "Project website", cls: "setting-item-description" });
 		supportHeader.style.display = 'block';
 
 		supportContainer.style.display = 'grid';
@@ -435,7 +433,7 @@ export class SettingsPage extends PluginSettingTab
 			'color', 'background', 'margin', 'padding', 'width', 'height', 'display', 'position', 'font', "cm", "pcr", "app", "workspace"
 		]);
 
-		const root = safeParser(stylesheet);
+		const root = safeParser(stylesheet, { map: false });
 
 		// Extract words from top comments
 		root.nodes.forEach(node => {

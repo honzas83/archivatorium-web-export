@@ -1,6 +1,6 @@
 import esbuild from "esbuild";
 import process from "process";
-import builtins from "builtin-modules";
+import { builtinModules } from "node:module";
 import fs from "fs";
 import path from "path";
 
@@ -81,8 +81,23 @@ const rawImportPlugin = {
   }
 };
 
+async function buildOrWatch(options, label) {
+  try {
+    if (prod) {
+      await esbuild.build(options);
+    } else {
+      const context = await esbuild.context(options);
+      await context.watch();
+    }
+    console.log(`${label} completed`);
+  } catch (error) {
+    console.error(`${label} failed:`, error);
+    process.exit(1);
+  }
+}
+
 // First build
-await esbuild.build({
+await buildOrWatch({
   entryPoints: ["src/frontend/main/index.txt.ts"],
   external: ['moment', "src/plugin/*"],
   bundle: true,
@@ -91,18 +106,12 @@ await esbuild.build({
   platform: 'browser',
   outdir: "src/frontend/dist",
   tsconfig: "tsconfig.frontend.json",
-  watch: !prod,
   plugins: [regexReplacementPlugin],
   write: false, // Keep this false to allow the plugin to handle file writing
-}).then(() => {
-  console.log("Frontend build completed");
-}).catch((error) => {
-  console.error("Frontend build failed:", error);
-  process.exit(1);
-});
+}, "Frontend build");
 
 // Second build
-await esbuild.build({
+await buildOrWatch({
   loader: {
     '.txt.js': 'text',
     '.txt.css': 'text',
@@ -135,13 +144,12 @@ await esbuild.build({
     '@lezer/lr',
     'node:buffer',
     'node:stream',
-    ...builtins
+    ...builtinModules
   ],
   format: 'cjs',
-  watch: !prod,
   target: 'es2018',
   logLevel: "info",
   sourcemap: prod ? false : 'inline',
   treeShaking: true,
   outfile: 'main.js',
-}).catch(() => process.exit(1));
+}, "Plugin build");

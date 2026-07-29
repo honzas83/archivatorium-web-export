@@ -1,7 +1,13 @@
 import { Settings, SettingsPage } from "src/plugin/settings/settings";
 import { Path } from "./path";
-/* @ts-ignore */
-const dialog: Electron.Dialog = require('electron').remote.dialog;
+
+interface ElectronDialog {
+	showSaveDialog(options: object): Promise<{ canceled: boolean; filePath?: string }>;
+	showOpenDialog(options: object): Promise<{ canceled: boolean; filePaths: string[] }>;
+}
+
+/* @ts-ignore Electron is supplied by the Obsidian desktop runtime. */
+const dialog = require('electron').remote.dialog as ElectronDialog;
 
 export namespace FileDialogs
 {

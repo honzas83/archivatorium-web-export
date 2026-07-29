@@ -44,10 +44,13 @@ export default class HTMLExportPlugin extends Plugin {
 	}
 
 	async onload() {
-		console.log("Loading webpage-html-export plugin");
+		console.log("Loading archivatorium-web-export plugin");
 		this.checkForUpdates();
 		HTMLExportPlugin.pluginVersion = this.manifest.version;
 
+		// @ts-ignore
+		window.ArchivatoriumWebExport = this;
+		// Keep the upstream API name available for integrations.
 		// @ts-ignore
 		window.WebpageHTMLExport = this;
 
@@ -146,12 +149,12 @@ export default class HTMLExportPlugin extends Plugin {
 
 		try {
 			let url =
-				"https://raw.githubusercontent.com/KosmosisDire/obsidian-webpage-export/master/manifest.json?cache=" +
+				"https://raw.githubusercontent.com/honzas83/archivatorium-web-export/master/manifest.json?cache=" +
 				Date.now() +
 				"";
 			if (this.manifest.version.endsWith("b"))
 				url =
-					"https://raw.githubusercontent.com/KosmosisDire/obsidian-webpage-export/master/manifest-beta.json?cache=" +
+					"https://raw.githubusercontent.com/honzas83/archivatorium-web-export/master/manifest-beta.json?cache=" +
 					Date.now() +
 					"";
 			const manifestResp = await requestUrl(url);
@@ -188,6 +191,6 @@ export default class HTMLExportPlugin extends Plugin {
 	}
 
 	onunload() {
-		ExportLog.log("unloading webpage-html-export plugin");
+		ExportLog.log("unloading archivatorium-web-export plugin");
 	}
 }

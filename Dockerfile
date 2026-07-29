@@ -1,4 +1,4 @@
-FROM node:20-alpine AS plugin
+FROM node:24-alpine AS plugin
 
 # copy the assets and source code
 WORKDIR /app
@@ -10,6 +10,7 @@ RUN npm install
 # copy and build the app
 COPY esbuild.config.mjs tsconfig*.json /app/
 COPY src /app/src
+COPY server /app/server
 RUN npm run build
 
 # copy the rest

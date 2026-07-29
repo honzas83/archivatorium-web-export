@@ -1,7 +1,6 @@
 const pathTools = require('upath');
 import { Stats, existsSync, statSync, promises as fs } from 'fs';
 import { FileSystemAdapter } from 'obsidian';
-import internal from 'stream'; 
 import { homedir, platform } from 'os';
 import { readdir, rmdir } from 'fs/promises';
 import { i18n } from '../translations/language';
@@ -772,7 +771,7 @@ export class Path
 		}
 	}
 
-	async write(data: string | NodeJS.ArrayBufferView | Iterable<string | NodeJS.ArrayBufferView> | AsyncIterable<string | NodeJS.ArrayBufferView> | internal.Stream, encoding: "ascii" | "utf8" | "utf-8" | "utf16le" | "ucs2" | "ucs-2" | "base64" | "base64url" | "latin1" | "binary" | "hex" = "utf-8"): Promise<boolean>
+	async write(data: string | NodeJS.ArrayBufferView | Iterable<string | NodeJS.ArrayBufferView> | AsyncIterable<string | NodeJS.ArrayBufferView>, encoding: "ascii" | "utf8" | "utf-8" | "utf16le" | "ucs2" | "ucs-2" | "base64" | "base64url" | "latin1" | "binary" | "hex" = "utf-8"): Promise<boolean>
 	{
 		if (this.isDirectory) return false;
 
@@ -1035,5 +1034,4 @@ export class Path
 	}
 
 }
-
 

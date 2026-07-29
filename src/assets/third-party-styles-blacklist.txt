@@ -23,6 +23,7 @@ surfing
 table-editor-obsidian
 text-snippets-obsidian
 webpage-html-export
+archivatorium-web-export
 lapel
 obsidian-regex-replace
 templater-obsidian

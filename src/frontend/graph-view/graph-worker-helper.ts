@@ -214,7 +214,7 @@ export class GraphRenderWorker
 		const alpha = parseFloat(opacity);
 		const result = 
 		{
-			a: (alpha * (color?.alpha ?? 1)) ?? 1,
+			a: alpha * (color?.alpha ?? 1),
 			rgb: (color?.red ?? 0x880000) << 16 | (color?.green ?? 0x008800)  << 8 | (color?.blue ?? 0x000088)
 		};
 
@@ -344,4 +344,3 @@ export class GraphRenderWorker
         return this.toWorldspace(this.width / 2, this.height / 2);
     }
 }
-

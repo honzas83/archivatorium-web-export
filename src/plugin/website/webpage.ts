@@ -265,7 +265,7 @@ export class Webpage extends Attachment
 		const tags: string[] = [];
 		if (tagCaches)
 		{
-			tags.push(...Array.from(tagCaches).map((tag) => tag.tag));
+			tags.push(...Array.from(tagCaches as Iterable<{ tag: string }>).map((tag) => tag.tag));
 		}
 
 		return tags;

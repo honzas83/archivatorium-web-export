@@ -1,8 +1,8 @@
 {
-  "name": "obsidian-webpage-export-shopping-basket-server",
+  "name": "archivatorium-web-export-server",
   "private": true,
   "type": "module",
-  "description": "Companion server for Obsidian Webpage Export shopping basket checkout.",
+  "description": "Companion server for Archivatorium Web Export.",
   "engines": {
     "node": ">=24"
   },

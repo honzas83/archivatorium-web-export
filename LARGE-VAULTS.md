@@ -82,8 +82,8 @@ that do not use the companion server.
 
 ## Real-vault Baseline
 
-The optimization was exercised against
-`NATO_Mass_Files_metadata_v7` without reading or transmitting note contents.
+The optimization was exercised against an existing large production vault
+without reading or transmitting note contents.
 Disk usage is measured with `du`, not by summing file sizes, so hardlinked files
 are not counted repeatedly:
 
