@@ -181,8 +181,9 @@ to an untrusted network.
 
 - Exporting reads selected files and metadata from the local vault and writes
   the generated website to the destination chosen by the user.
-- The plugin checks this GitHub repository for its current stable or beta
-  manifest.
+- On startup, the plugin downloads `manifest.json`, or `manifest-beta.json` for
+  beta builds, from this GitHub repository. It only compares version numbers
+  and displays an update notice; the request contains no vault data.
 - Remote emoji or other explicitly referenced assets may be downloaded when
   required by exported content and the selected export options.
 - Static exports do not send vault contents to Archivatorium, the project
@@ -216,7 +217,3 @@ interlinking pipeline is maintained in
 
 Information about the fork maintainer is available at
 [honzas.cz](https://honzas.cz).
-
-This project has historically been tested with
-[BrowserStack](https://www.browserstack.com/open-source), which supports open
-source browser testing but does not otherwise endorse the project.
