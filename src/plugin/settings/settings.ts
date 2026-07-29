@@ -216,7 +216,19 @@ export class SettingsPage extends PluginSettingTab
 		createFeatureSetting(section, lang.fileNavigation.title,	Settings.exportOptions.fileNavigationOptions,	lang.fileNavigation.description);
 		createFeatureSetting(section, lang.outline.title,			Settings.exportOptions.outlineOptions,			lang.outline.description);
 		createFeatureSetting(section, lang.graphView.title, 		Settings.exportOptions.graphViewOptions,		lang.graphView.description);
-		createFeatureSetting(section, lang.search.title,			Settings.exportOptions.searchOptions,			lang.search.description);
+		createFeatureSetting(section, lang.search.title,			Settings.exportOptions.searchOptions,			lang.search.description,
+			(container) =>
+			{
+				createToggle(container, "Server-side full-text search",
+					() => Settings.exportOptions.searchOptions.serverSide,
+					(value) => Settings.exportOptions.searchOptions.serverSide = value,
+					"Store complete full text on disk and query it through the companion Node server. Recommended for large OCR vaults.");
+				createText(container, "Search API endpoint",
+					() => Settings.exportOptions.searchOptions.searchEndpoint,
+					(value) => Settings.exportOptions.searchOptions.searchEndpoint = value,
+					"HTTP endpoint used when server-side full-text search is enabled.");
+			}
+		);
 		createFeatureSetting(section, lang.shoppingBasket.title,	Settings.exportOptions.shoppingBasketOptions,	lang.shoppingBasket.description);
 		createFeatureSetting(section, lang.linkPreview.title,		Settings.exportOptions.linkPreviewOptions,		lang.linkPreview.description);
 		createFeatureSetting(section, lang.themeToggle.title,		Settings.exportOptions.themeToggleOptions,		lang.themeToggle.description);

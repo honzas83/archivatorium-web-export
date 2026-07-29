@@ -6,7 +6,6 @@ import { Settings, SettingsPage } from "src/plugin/settings/settings";
 import { Path } from "src/plugin/utils/path";
 import { SimpleFileListGenerator } from "src/plugin/features/simple-list-generator";
 import { DataviewRenderer } from "./dataview-renderer";
-import { Utils } from "../utils/utils";
 import { AssetLoader } from "../asset-loaders/base-asset";
 import { AssetType } from "../asset-loaders/asset-types";
 import { IconHandler } from "../utils/icon-handler";
@@ -105,9 +104,17 @@ export namespace _MarkdownRendererInternal {
 	export let errorInBatch: boolean = false;
 	export let cancelled: boolean = false;
 	export let batchStarted: boolean = false;
+	let activeLeafBeforeBatch: WorkspaceLeaf | null = null;
 	let logContainer: HTMLElement | undefined;
 	let loadingContainer: HTMLElement | undefined;
 	let fileListContainer: HTMLElement | undefined;
+	let documentProgressStartedAt: number = 0;
+	let documentProgressActive: boolean = false;
+	let completedWorkItems: number = 0;
+	let totalWorkItems: number = 0;
+	let completedPhaseItems: number = 0;
+	let totalPhaseItems: number = 0;
+	let lastWorkProgressPaintAt: number = 0;
 
 	export const batchDocument = document.implementation.createHTMLDocument();
 	let markdownView: MarkdownView | undefined;
@@ -161,6 +168,13 @@ export namespace _MarkdownRendererInternal {
 		return;
 	}
 
+	function reportFallbackRenderer(file: TFile, reason: string): void {
+		ExportLog.log(
+			`${reason} Using the fallback renderer only for ${file.name}.`,
+			"Switching renderer"
+		);
+	}
+
 	export async function renderFile(file: TFile, options: MarkdownRendererOptions): Promise<{ contentEl: HTMLElement, viewType: string } | undefined> {
 		if (MarkdownRendererAPI.viewableMediaExtensions.contains(file.extension)) {
 			return { contentEl: await createMediaPage(file, options), viewType: "attachment" };
@@ -179,6 +193,10 @@ export namespace _MarkdownRendererInternal {
 
 		try {
 			await renderLeaf.openFile(file, { active: false });
+			if (activeLeafBeforeBatch && app.workspace.activeLeaf === renderLeaf)
+			{
+				app.workspace.setActiveLeaf(activeLeafBeforeBatch, { focus: false });
+			}
 		}
 		catch (e) {
 			return failRender(file, e);
@@ -469,11 +487,9 @@ export namespace _MarkdownRendererInternal {
 			);
 
 		const previewEl: HTMLElement = renderer.previewEl;
-		const sizerEl: HTMLElement =
-			previewEl.querySelector(".markdown-preview-sizer") ?? previewEl;
-		previewEl.style.minHeight = sizerEl.style.minHeight;
-
-		await Utils.delay(16);
+		const getSizerEl = (): HTMLElement =>
+			previewEl.querySelector(".markdown-preview-sizer") as HTMLElement ?? previewEl;
+		previewEl.style.minHeight = getSizerEl().style.minHeight;
 
 		let rendered = false;
 		// @ts-ignore
@@ -485,21 +501,23 @@ export namespace _MarkdownRendererInternal {
 		// @ts-ignore
 		preview.rerender(true);
 
-		await Utils.delay(5);
-
-		previewEl.style.minHeight = sizerEl.style.minHeight;
-
-		await Utils.delay(5);
-
 		// wait for rendering to finish using callback
 		let renderSuccess = await waitUntil(
-			() => rendered || checkCancelled(),
-			2000,
+			() =>
+				rendered ||
+				sections.every((section) => section.rendered) ||
+				getSizerEl().children.length >= sections.length ||
+				checkCancelled(),
+			5_000,
 			16
 		);
 		if (checkCancelled()) return undefined;
 		if (!renderSuccess)
-			return failRender(preview.file, "Failed to render preview!");
+		{
+			newMarkdownEl.remove();
+			reportFallbackRenderer(preview.file, "Preview renderer did not signal completion.");
+			return renderMarkdownViewFallback(preview, options);
+		}
 
 		// @ts-ignore
 		const foldedCallouts: HTMLElement[] = [];
@@ -516,39 +534,25 @@ export namespace _MarkdownRendererInternal {
 			foldedCallouts.push(...folded);
 		}
 
-		await Utils.delay(5);
-
 		// wait until the sizer contains all the sections
 		ExportLog.log("Waiting for all sections to be counted...");
 		var sectionsSuccess = await waitUntil(
 			() => {
-				console.log(sizerEl.children.length, sections.length);
 				return (
-					sizerEl.children.length >= sections.length ||
+					getSizerEl().children.length >= sections.length ||
 					checkCancelled()
 				);
 			},
-			4000,
-			5
+			1_000,
+			16
 		);
 		if (checkCancelled()) return undefined;
 
 		if (!sectionsSuccess) {
-			console.log(
-				sizerEl.children.length,
-				sections.length,
-				sizerEl.children,
-				sections
-			);
-			ExportLog.warning(
-				"Failed to render all sections in file " +
-					preview.file.name +
-					", using fallback!"
-			);
+			newMarkdownEl.remove();
+			reportFallbackRenderer(preview.file, "Preview renderer did not attach all document sections.");
 			return renderMarkdownViewFallback(preview, options);
 		}
-
-		await Utils.delay(50);
 
 		// compile dataview
 		if (DataviewRenderer.isDataviewEnabled())
@@ -663,7 +667,7 @@ export namespace _MarkdownRendererInternal {
 			});
 		}
 
-		newSizerEl.innerHTML = sizerEl.innerHTML;
+		newSizerEl.innerHTML = getSizerEl().innerHTML;
 
 		// get banner plugin banner and insert it before the sizer element
 		const banner = preview.containerEl.querySelector(
@@ -974,7 +978,6 @@ export namespace _MarkdownRendererInternal {
 
 		if (!canvasEl)
 		{
-			console.log(contentEl.innerHTML);
 			return failRender(view.file, "Failed to render canvas! Canvas element not found!");	
 		}
 
@@ -1225,7 +1228,14 @@ export namespace _MarkdownRendererInternal {
 			batchDocument.write("<body></body>");
 		}
 
-		renderLeaf = TabManager.openNewTab("tab", "horizontal", true);
+		activeLeafBeforeBatch = app.workspace.activeLeaf;
+		renderLeaf = TabManager.openNewTab("tab", "horizontal", false);
+		// @ts-ignore Obsidian exposes the leaf container at runtime.
+		renderLeaf.containerEl.classList.add("html-export-render-leaf");
+		if (activeLeafBeforeBatch && activeLeafBeforeBatch !== renderLeaf)
+		{
+			app.workspace.setActiveLeaf(activeLeafBeforeBatch, { focus: false });
+		}
 		markdownView = new MarkdownView(renderLeaf);
 
 		// @ts-ignore
@@ -1291,6 +1301,7 @@ export namespace _MarkdownRendererInternal {
 
 		electronWindow = undefined;
 		renderLeaf = undefined;
+		activeLeafBeforeBatch = null;
 		loadingContainer = undefined;
 		fileListContainer = undefined;
 
@@ -1310,7 +1321,11 @@ export namespace _MarkdownRendererInternal {
 		<div class="html-progress-log-message" style="margin-left: 2em; font-size: 0.8em;white-space: pre-wrap;"></div>
 		`;
 		logEl.querySelector(".html-progress-log-title")!.textContent = title;
-		logEl.querySelector(".html-progress-log-message")!.textContent = message.toString();
+		const messageText = String(message);
+		logEl.querySelector(".html-progress-log-message")!.textContent =
+			messageText.length > 16_384
+				? `${messageText.substring(0, 16_384)}\n[message truncated]`
+				: messageText;
 
 		logEl.style.color = textColor;
 		logEl.style.backgroundColor = backgroundColor;
@@ -1331,6 +1346,7 @@ export namespace _MarkdownRendererInternal {
 					<div class="html-progress-inner">
 						<h1>Generating HTML</h1>
 						<progress class="html-progress-bar" value="0" min="0" max="1"></progress>
+						<span class="html-progress-metrics"></span>
 						<span class="html-progress-sub"></span>
 						<button class="html-progress-cancel">Cancel</button>
 					</div>
@@ -1350,6 +1366,7 @@ export namespace _MarkdownRendererInternal {
 	}
 
 	let logShowing = false;
+	const maxVisibleLogItems = 200;
 	function appendLogEl(logEl: HTMLElement) {
 		logContainer = loadingContainer?.querySelector(".html-progress-log") ?? undefined;
 
@@ -1365,6 +1382,11 @@ export namespace _MarkdownRendererInternal {
 		}
 
 		logContainer.appendChild(logEl);
+		const logItems = logContainer.querySelectorAll(".html-progress-log-item");
+		for (let index = 0; index < logItems.length - maxVisibleLogItems; index++)
+		{
+			logItems[index].remove();
+		}
 		// @ts-ignore
 		logEl.scrollIntoView({ behavior: "instant", block: "end", inline: "end" });
 	}
@@ -1380,7 +1402,7 @@ export namespace _MarkdownRendererInternal {
 		if (!loadingContainer) return;
 
 		const progressBar = loadingContainer.querySelector("progress");
-		if (progressBar) {
+		if (progressBar && !documentProgressActive) {
 			progressBar.value = fraction;
 			progressBar.style.backgroundColor = "transparent";
 			progressBar.style.color = progressColor;
@@ -1388,13 +1410,107 @@ export namespace _MarkdownRendererInternal {
 
 
 		const messageElement = loadingContainer.querySelector("h1");
-		if (messageElement) {
+		if (messageElement && messageElement.textContent !== message) {
 			messageElement.innerText = message;
 		}
 
 		const subMessageElement = loadingContainer.querySelector("span.html-progress-sub") as HTMLElement;
-		if (subMessageElement) {
+		if (subMessageElement && subMessageElement.textContent !== subMessage) {
 			subMessageElement.innerText = subMessage;
+		}
+
+		if (!documentProgressActive) electronWindow?.setProgressBar(fraction);
+	}
+
+	export function _startDocumentProgress(total: number, phaseTotal: number): void {
+		documentProgressStartedAt = performance.now();
+		documentProgressActive = true;
+		completedWorkItems = 0;
+		totalWorkItems = Math.max(0, total);
+		completedPhaseItems = 0;
+		totalPhaseItems = Math.max(0, phaseTotal);
+		lastWorkProgressPaintAt = 0;
+		const metricsElement = loadingContainer?.querySelector(".html-progress-metrics") as HTMLElement | null;
+		if (metricsElement) metricsElement.textContent = "";
+		_reportDocumentProgress(completedWorkItems, totalWorkItems);
+	}
+
+	export function _endDocumentProgress(): void {
+		documentProgressActive = false;
+	}
+
+	export function _setRemainingWorkItems(remaining: number): void {
+		if (!documentProgressActive) return;
+		totalWorkItems = completedWorkItems + Math.max(0, remaining);
+		documentProgressStartedAt = performance.now();
+		completedPhaseItems = 0;
+		totalPhaseItems = Math.max(0, remaining);
+		lastWorkProgressPaintAt = 0;
+		_reportDocumentProgress(completedWorkItems, totalWorkItems);
+	}
+
+	export function _advanceWorkProgress(
+		count: number = 1,
+		message: string = "",
+		subMessage: string = "",
+		progressColor: string = "var(--interactive-accent)"
+	): void {
+		if (!documentProgressActive) return;
+		completedWorkItems = Math.min(totalWorkItems, completedWorkItems + Math.max(0, count));
+		completedPhaseItems = Math.min(totalPhaseItems, completedPhaseItems + Math.max(0, count));
+		const now = performance.now();
+		const shouldPaint =
+			now - lastWorkProgressPaintAt >= 200 ||
+			completedWorkItems >= totalWorkItems;
+		if (!shouldPaint) return;
+		lastWorkProgressPaintAt = now;
+		if (message)
+		{
+			_reportProgress(
+				totalWorkItems > 0 ? completedWorkItems / totalWorkItems : 0,
+				message,
+				subMessage,
+				progressColor
+			);
+		}
+		_reportDocumentProgress(completedWorkItems, totalWorkItems);
+	}
+
+	export function _reportDocumentProgress(completed: number, total: number): void {
+		if (!loadingContainer || total <= 0) return;
+
+		const fraction = Math.min(1, Math.max(0, completed / total));
+		const elapsedSeconds = Math.max(0, (performance.now() - documentProgressStartedAt) / 1000);
+		const documentsPerSecond = completedPhaseItems > 0 && elapsedSeconds > 0
+			? completedPhaseItems / elapsedSeconds
+			: 0;
+		const remainingSeconds = documentsPerSecond > 0
+			? (totalPhaseItems - completedPhaseItems) / documentsPerSecond
+			: 0;
+		const formatDuration = (seconds: number): string => {
+			const rounded = Math.max(0, Math.round(seconds));
+			const hours = Math.floor(rounded / 3600);
+			const minutes = Math.floor((rounded % 3600) / 60);
+			const remainder = rounded % 60;
+			if (hours > 0) return `${hours}h ${minutes}m`;
+			if (minutes > 0) return `${minutes}m ${remainder}s`;
+			return `${remainder}s`;
+		};
+
+		const progressBar = loadingContainer.querySelector("progress");
+		if (progressBar && progressBar.value !== fraction) progressBar.value = fraction;
+
+		const metricsElement = loadingContainer.querySelector(".html-progress-metrics") as HTMLElement | null;
+		if (metricsElement)
+		{
+			const percentage = (fraction * 100).toFixed(1);
+			const rate = documentsPerSecond.toFixed(2);
+			const eta = completed >= total
+				? "0s"
+				: documentsPerSecond > 0 ? formatDuration(remainingSeconds) : "calculating";
+			const metricsText =
+				`${percentage}% · ${completed}/${total} files · ${rate} files/s · ETA ${eta}`;
+			if (metricsElement.textContent !== metricsText) metricsElement.textContent = metricsText;
 		}
 
 		electronWindow?.setProgressBar(fraction);
@@ -1453,14 +1569,38 @@ export namespace _MarkdownRendererInternal {
 
 export namespace ExportLog {
 	export let fullLog: string = "";
+	const maxLogChars = 2_000_000;
+	const maxMessageChars = 16_384;
 	let totalProgress = 1;
 	let currentProgress = 0;
 
 	function logToString(message: any, title: string) {
-		const messageString = (typeof message === "string") ? message : JSON.stringify(message).replaceAll("\n", "\n\t\t");
+		let messageString: string;
+		try
+		{
+			messageString = (typeof message === "string") ? message : JSON.stringify(message);
+		}
+		catch
+		{
+			messageString = String(message);
+		}
+		messageString = messageString.replaceAll("\n", "\n\t\t");
+		if (messageString.length > maxMessageChars)
+		{
+			messageString = `${messageString.substring(0, maxMessageChars)}\n\t\t[message truncated]`;
+		}
 		const titleString = title != "" ? title + "\t" : "";
 		const log = `${titleString}${messageString}\n`;
 		return log;
+	}
+
+	function appendToFullLog(message: any, title: string): void
+	{
+		fullLog += logToString(message, title);
+		if (fullLog.length > maxLogChars)
+		{
+			fullLog = `[older log entries omitted]\n${fullLog.substring(fullLog.length - maxLogChars)}`;
+		}
 	}
 
 	function humanReadableJSON(object: any) {
@@ -1478,7 +1618,7 @@ export namespace ExportLog {
 		pullPathLogs();
 
 		messageTitle = `[INFO] ${messageTitle}`
-		fullLog += logToString(message, messageTitle);
+		appendToFullLog(message, messageTitle);
 
 		if (messageTitle != "") console.log(messageTitle + " ", message);
 		else console.log(message);
@@ -1492,7 +1632,7 @@ export namespace ExportLog {
 		pullPathLogs();
 
 		messageTitle = `[WARNING] ${messageTitle}`
-		fullLog += logToString(message, messageTitle);
+		appendToFullLog(message, messageTitle);
 
 		if (messageTitle != "") console.warn(messageTitle + " ", message);
 		else console.warn(message);
@@ -1506,7 +1646,7 @@ export namespace ExportLog {
 		pullPathLogs();
 
 		messageTitle = (fatal ? "[FATAL ERROR] " : "[ERROR] ") + messageTitle;
-		fullLog += logToString(message, messageTitle);
+		appendToFullLog(message, messageTitle);
 
 		if (fatal && messageTitle == "Error") messageTitle = "Fatal Error";
 		if (messageTitle != "") console.error(messageTitle + " ", message);
@@ -1524,6 +1664,7 @@ export namespace ExportLog {
 	export function resetProgress() {
 		totalProgress = 1;
 		currentProgress = 0;
+		fullLog = "";
 	}
 
 	export function progress(progressBy: number, message: string, subMessage: string, progressColor: string = "var(--interactive-accent)") {
@@ -1532,9 +1673,30 @@ export namespace ExportLog {
 	}
 
 	export function setProgress(fraction: number, message: string, subMessage: string, progressColor: string = "var(--interactive-accent)") {
-		fullLog += logToString({ fraction, message, subMessage }, "Progress");
 		pullPathLogs();
 		_MarkdownRendererInternal._reportProgress(fraction, message, subMessage, progressColor);
+	}
+
+	export function startDocumentProgress(total: number, phaseTotal: number = total): void {
+		_MarkdownRendererInternal._startDocumentProgress(total, phaseTotal);
+	}
+
+	export function endDocumentProgress(): void {
+		_MarkdownRendererInternal._endDocumentProgress();
+	}
+
+	export function setRemainingWorkItems(remaining: number): void {
+		_MarkdownRendererInternal._setRemainingWorkItems(remaining);
+	}
+
+	export function advanceWorkProgress(
+		count: number = 1,
+		message: string = "",
+		subMessage: string = "",
+		progressColor: string = "var(--interactive-accent)"
+	): void {
+		currentProgress += count;
+		_MarkdownRendererInternal._advanceWorkProgress(count, message, subMessage, progressColor);
 	}
 
 	export function setFileList(items: string[], options: { icons?: string[] | string, renderAsMarkdown?: boolean, title?: string }) {
@@ -1585,4 +1747,3 @@ export namespace ExportLog {
 		return _MarkdownRendererInternal.checkCancelled();
 	}
 }
-

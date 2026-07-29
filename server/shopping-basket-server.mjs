@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 import { createServer } from "node:http";
-import { readFile, readdir, stat } from "node:fs/promises";
+import { createReadStream } from "node:fs";
+import { mkdir, readFile, readdir, stat } from "node:fs/promises";
+import { DatabaseSync } from "node:sqlite";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -15,6 +17,16 @@ const EXPORT_ROOT = process.env.EXPORT_ROOT
 const PUBLIC_ARCHIVE_ROOT = process.env.PUBLIC_ARCHIVE_ROOT ?? "";
 const MAX_REQUEST_BYTES = Number(process.env.MAX_CHECKOUT_BYTES ?? 1_000_000);
 const MAX_CHECKOUT_ITEMS = Number(process.env.MAX_CHECKOUT_ITEMS ?? 5000);
+const SEARCH_CORPUS_ROOT = path.join(EXPORT_ROOT, "site-lib", "search-corpus");
+const SEARCH_DATA_ROOT = path.join(EXPORT_ROOT, ".server-data");
+const SEARCH_DATABASE_PATH = path.join(SEARCH_DATA_ROOT, "search.sqlite");
+const SEARCH_VALUE_SEPARATOR = "\u001f";
+let searchDatabasePromise;
+const searchStatus = {
+	state: "idle",
+	processed: 0,
+	total: 0,
+};
 
 const contentTypes = new Map([
 	[".html", "text/html; charset=utf-8"],
@@ -54,6 +66,189 @@ function sendJSON(response, statusCode, value) {
 	send(response, statusCode, JSON.stringify(value), {
 		"Content-Type": "application/json; charset=utf-8",
 	});
+}
+
+function tokenizeSearchQuery(query) {
+	const terms = String(query).toLowerCase().match(/[\p{L}\p{N}_]+/gu) ?? [];
+	return terms.map((term) => `"${term.replaceAll('"', '""')}"*`).join(" AND ");
+}
+
+function searchColumnsForType(type) {
+	const columns = [];
+	if (type & 1) columns.push("title");
+	if (type & 2) columns.push("aliases");
+	if (type & 4) columns.push("headers");
+	if (type & 8) columns.push("tags");
+	if (type & 16) columns.push("path");
+	if (type & 32) columns.push("content");
+	if (type & 64) columns.push("metadata");
+	return columns;
+}
+
+function joinSearchValues(values) {
+	return Array.isArray(values) ? values.map(String).join(SEARCH_VALUE_SEPARATOR) : "";
+}
+
+function splitSearchValues(value) {
+	return value ? String(value).split(SEARCH_VALUE_SEPARATOR) : [];
+}
+
+async function initializeSearchDatabase() {
+	searchStatus.state = "indexing";
+	searchStatus.processed = 0;
+	await mkdir(SEARCH_DATA_ROOT, { recursive: true });
+	const database = new DatabaseSync(SEARCH_DATABASE_PATH);
+	database.exec(`
+		PRAGMA journal_mode = WAL;
+		PRAGMA synchronous = NORMAL;
+		CREATE VIRTUAL TABLE IF NOT EXISTS search_documents USING fts5(
+			path,
+			source_path UNINDEXED,
+			title,
+			metadata,
+			aliases,
+			headers,
+			tags,
+			content,
+			tokenize = 'unicode61 remove_diacritics 2'
+		);
+		CREATE TABLE IF NOT EXISTS search_corpus_state (
+			filename TEXT PRIMARY KEY,
+			path TEXT NOT NULL,
+			modified_time REAL NOT NULL,
+			size INTEGER NOT NULL
+		);
+	`);
+
+	const knownRecords = new Map(
+		database.prepare("SELECT filename, path, modified_time, size FROM search_corpus_state")
+			.all()
+			.map((record) => [record.filename, record])
+	);
+	const seenFilenames = new Set();
+	const deleteDocument = database.prepare("DELETE FROM search_documents WHERE path = ?");
+	const insertDocument = database.prepare(`
+		INSERT INTO search_documents(path, source_path, title, metadata, aliases, headers, tags, content)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	`);
+	const updateState = database.prepare(`
+		INSERT OR REPLACE INTO search_corpus_state(filename, path, modified_time, size)
+		VALUES (?, ?, ?, ?)
+	`);
+	const deleteState = database.prepare("DELETE FROM search_corpus_state WHERE filename = ?");
+
+	let entries = [];
+	try {
+		entries = await readdir(SEARCH_CORPUS_ROOT, { withFileTypes: true });
+	} catch (error) {
+		if (error?.code !== "ENOENT") throw error;
+	}
+	const corpusEntries = entries.filter((entry) => entry.isFile() && entry.name.endsWith(".json"));
+	searchStatus.total = corpusEntries.length;
+
+	database.exec("BEGIN IMMEDIATE");
+	try {
+		for (const entry of corpusEntries) {
+			seenFilenames.add(entry.name);
+			const recordPath = path.join(SEARCH_CORPUS_ROOT, entry.name);
+			const recordStat = await stat(recordPath);
+			const previous = knownRecords.get(entry.name);
+			if (previous?.modified_time === recordStat.mtimeMs && previous?.size === recordStat.size) {
+				searchStatus.processed++;
+				continue;
+			}
+
+			const record = JSON.parse(await readFile(recordPath, "utf8"));
+			if (!record?.path || !record?.sourcePath) continue;
+
+			if (previous?.path) deleteDocument.run(previous.path);
+			deleteDocument.run(record.path);
+			insertDocument.run(
+				record.path,
+				record.sourcePath,
+				record.title ?? record.path,
+				record.metadata ?? "",
+				joinSearchValues(record.aliases),
+				joinSearchValues(record.headers),
+				joinSearchValues(record.tags),
+				record.content ?? "",
+			);
+			updateState.run(entry.name, record.path, recordStat.mtimeMs, recordStat.size);
+			searchStatus.processed++;
+		}
+
+		for (const [filename, previous] of knownRecords) {
+			if (seenFilenames.has(filename)) continue;
+			deleteDocument.run(previous.path);
+			deleteState.run(filename);
+		}
+		database.exec("COMMIT");
+	} catch (error) {
+		database.exec("ROLLBACK");
+		database.close();
+		searchStatus.state = "error";
+		throw error;
+	}
+
+	searchStatus.state = "ready";
+	return database;
+}
+
+function getSearchDatabase() {
+	searchDatabasePromise ??= initializeSearchDatabase();
+	return searchDatabasePromise;
+}
+
+async function handleSearch(request, response) {
+	try {
+		const body = await readJSONBody(request);
+		const query = typeof body.query === "string" ? body.query.trim() : "";
+		const type = Number(body.type ?? 127);
+		const requestedLimit = Number(body.limit ?? 50);
+		const limit = Number.isFinite(requestedLimit)
+			? Math.max(1, Math.min(Math.trunc(requestedLimit), 5000))
+			: 50;
+		const tokenQuery = tokenizeSearchQuery(query);
+		const columns = searchColumnsForType(type);
+		if (!tokenQuery || columns.length === 0) {
+			sendJSON(response, 200, { query, items: [] });
+			return;
+		}
+
+		const matchQuery = `{${columns.join(" ")}} : (${tokenQuery})`;
+		const database = await getSearchDatabase();
+		const candidateLimit = type === 8 ? Math.max(limit * 10, 1000) : limit;
+		let rows = database.prepare(`
+			SELECT path, source_path, title, aliases, headers, tags,
+				bm25(search_documents, 0, 0, 2, 8, 1.8, 1.5, 1.3, 1) AS rank
+			FROM search_documents
+			WHERE search_documents MATCH ?
+			ORDER BY rank
+			LIMIT ?
+		`).all(matchQuery, candidateLimit);
+
+		if (type === 8) {
+			const normalizedTag = query.trim().replace(/^#+/, "").toLowerCase();
+			rows = rows.filter((row) => splitSearchValues(row.tags).some((tag) => {
+				const normalized = tag.trim().replace(/^#+/, "").toLowerCase();
+				return normalized === normalizedTag || normalized.startsWith(`${normalizedTag}/`);
+			}));
+		}
+
+		const items = rows.slice(0, limit).map((row) => ({
+			path: row.path,
+			sourcePath: row.source_path,
+			title: row.title,
+			aliases: splitSearchValues(row.aliases),
+			headers: splitSearchValues(row.headers),
+			tags: splitSearchValues(row.tags),
+			score: Math.max(Number.EPSILON, -Number(row.rank)),
+		}));
+		sendJSON(response, 200, { query, items });
+	} catch (error) {
+		console.error("Search failed:", error);
+		sendJSON(response, 400, { error: error.message ?? "Search failed." });
+	}
 }
 
 function isPathInside(parent, candidate) {
@@ -107,9 +302,29 @@ async function readJSONBody(request) {
 }
 
 async function loadMetadata() {
-	const metadataPath = path.join(EXPORT_ROOT, "site-lib", "metadata.json");
+	const metadataRoot = path.join(EXPORT_ROOT, "site-lib");
+	const metadataPath = path.join(metadataRoot, "metadata.json");
 	const raw = await readFile(metadataPath, "utf8");
-	return JSON.parse(raw);
+	const metadata = JSON.parse(raw);
+	if (metadata.metadataShards) {
+		const resolveShard = (filename) => {
+			if (typeof filename !== "string" || !filename.endsWith(".json")) {
+				throw new Error("Invalid metadata shard.");
+			}
+			const shardPath = path.resolve(metadataRoot, filename);
+			if (!isPathInside(metadataRoot, shardPath)) {
+				throw new Error("Invalid metadata shard path.");
+			}
+			return shardPath;
+		};
+		const [webpages, fileInfo] = await Promise.all([
+			readFile(resolveShard(metadata.metadataShards.webpages), "utf8"),
+			readFile(resolveShard(metadata.metadataShards.fileInfo), "utf8"),
+		]);
+		metadata.webpages = JSON.parse(webpages);
+		metadata.fileInfo = JSON.parse(fileInfo);
+	}
+	return metadata;
 }
 
 function buildSourceIndexes(metadata) {
@@ -670,6 +885,16 @@ async function serveStatic(request, response) {
 		send(response, 404, "Not found", { "Content-Type": "text/plain; charset=utf-8" });
 		return;
 	}
+	if (
+		pathname === "/.server-data" ||
+		pathname.startsWith("/.server-data/") ||
+		pathname === "/.export-progress.json" ||
+		pathname === "/site-lib/search-corpus" ||
+		pathname.startsWith("/site-lib/search-corpus/")
+	) {
+		send(response, 404, "Not found", { "Content-Type": "text/plain; charset=utf-8" });
+		return;
+	}
 
 	if (pathname.endsWith("/")) pathname += "index.html";
 	if (pathname === "/") pathname = "/index.html";
@@ -683,10 +908,17 @@ async function serveStatic(request, response) {
 	try {
 		const fileStat = await stat(absolutePath);
 		if (!fileStat.isFile()) throw new Error("Not a file");
-		const data = await readFile(absolutePath);
-		send(response, 200, data, {
+		response.writeHead(200, {
 			"Content-Type": contentTypes.get(path.extname(absolutePath).toLowerCase()) ?? "application/octet-stream",
+			"Content-Length": fileStat.size,
 		});
+		if (request.method === "HEAD") {
+			response.end();
+			return;
+		}
+		createReadStream(absolutePath)
+			.on("error", () => response.destroy())
+			.pipe(response);
 	} catch {
 		const redirectPath = await resolveMetadataRedirect(pathname);
 		if (redirectPath) {
@@ -727,6 +959,14 @@ export const internals = {
 export function createShoppingBasketServer() {
 	return createServer(async (request, response) => {
 		const requestURL = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
+		if (request.method === "GET" && requestURL.pathname === "/api/search/status") {
+			sendJSON(response, 200, searchStatus);
+			return;
+		}
+		if (request.method === "POST" && requestURL.pathname === "/api/search") {
+			await handleSearch(request, response);
+			return;
+		}
 		if (request.method === "POST" && requestURL.pathname === "/api/checkout") {
 			await handleCheckout(request, response);
 			return;
@@ -742,6 +982,9 @@ export function createShoppingBasketServer() {
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
+	getSearchDatabase().catch((error) => {
+		console.error("Search index initialization failed:", error);
+	});
 	const server = createShoppingBasketServer();
 	server.listen(PORT, HOST, () => {
 		console.log(`Shopping basket server listening on http://${HOST}:${PORT}`);

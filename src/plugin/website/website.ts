@@ -15,6 +15,7 @@ import { GraphView } from "src/plugin/features/graph-view";
 import { ThemeToggle } from "src/plugin/features/theme-toggle";
 import { SearchInput } from "src/plugin/features/search-input";
 import { Utils } from "src/plugin/utils/utils";
+import { mkdir, rename, writeFile } from "fs/promises";
 
 
 export class Website
@@ -69,6 +70,9 @@ export class Website
 
 			template.insertFeature(fileTreeEl, this.exportOptions.fileNavigationOptions);
 			fileTreeElContainer.remove();
+			// The template now owns the generated markup; the construction tree can be collected.
+			// @ts-ignore
+			this.fileTree = undefined;
 		}
 
 		// inject custom head content
@@ -122,6 +126,7 @@ export class Website
 		ExportLog.addToProgressCap((files?.length ?? 0) * 0.1);
 
 		this.sourceFiles = files?.filter((file) => file) ?? [];
+		await this.writeProgress("initializing", 0, this.sourceFiles.length);
 
 		let rootPath = this.findCommonRootPath(this.sourceFiles);
 		this.exportOptions.exportRoot = rootPath;
@@ -148,32 +153,44 @@ export class Website
 		}
 
 		// create webpages
+		let initializedFiles = 0;
+		const useLargeVaultMode = this.sourceFiles.length > 100;
+		const exportMediaDirectly =
+			!this.exportOptions.combineAsSingleFile &&
+			(useLargeVaultMode || this.exportOptions.searchOptions.serverSide);
 		for (const file of this.sourceFiles)
 		{
 			try
 			{
 				const isConvertable = MarkdownRendererAPI.isConvertable(file.extension);
+				const isViewableMedia = MarkdownRendererAPI.viewableMediaExtensions.contains(file.extension);
 
 				// Make sure files which need to be saved directly without conversion are added to the index as attachments
-				if (!isConvertable || (MarkdownRendererAPI.viewableMediaExtensions.contains(file.extension)))
+				if (!isConvertable || isViewableMedia)
 				{
-					const data = Buffer.from(await app.vault.readBinary(file));
 					const path = this.getTargetPathForFile(file);
-					let attachment = new Attachment(data, path, file, this.exportOptions);
-					attachment.showInTree = true;
+					const attachment = this.exportOptions.combineAsSingleFile
+						? new Attachment(Buffer.from(await app.vault.readBinary(file)), path, file, this.exportOptions)
+						: Attachment.fromSource(path, file, this.exportOptions);
+					attachment.showInTree = !(exportMediaDirectly && isViewableMedia);
 					await this.index.addFile(attachment);
 				}
 
 				// Create pages for normal convertable files (md, canvas, excalidraw, etc) as well as convertable media files (png, pdf, etc)
-				if (isConvertable)
+				if (isConvertable && !(exportMediaDirectly && isViewableMedia))
 				{
 					let webpage = new Webpage(file, file.name, this, this.exportOptions);
 					webpage.showInTree = true;
-					await this.index.addFile(webpage);
+					await this.index.addFile(webpage, false);
 				}
 
 				ExportLog.progress(0.1, "Initializing Document", file.path, "var(--color-yellow)");
-				await Utils.delay(0);
+				initializedFiles++;
+				if (initializedFiles % 250 === 0)
+				{
+					await this.writeProgress("initializing", initializedFiles, this.sourceFiles.length);
+				}
+				if (initializedFiles % 100 === 0) await Utils.delay(0);
 			}
 			catch (error)
 			{
@@ -181,6 +198,9 @@ export class Website
 				continue;
 			}
 		}
+
+		this.index.sortFiles();
+		await this.writeProgress("building-file-tree", initializedFiles, this.sourceFiles.length);
 
 		try
 		{
@@ -194,6 +214,7 @@ export class Website
 				this.fileTree.generateWithItemsClosed = true;
 				this.fileTree.showFileExtentionTags = true;
 				this.fileTree.hideFileExtentionTags = ["md"];
+				this.fileTree.renderMarkdownTitles = paths.length < 5000;
 				this.fileTree.title = this.exportOptions.siteName ?? app.vault.getName();
 				this.fileTree.id = "file-explorer";
 				const tempContainer = document.createElement("div");
@@ -206,7 +227,6 @@ export class Website
 					if (!file.sourcePathRootRelative) return;
 					const fileTreeItem = this.fileTree?.getItemBySourcePath(file.sourcePathRootRelative);
 					file.treeOrder = fileTreeItem?.treeOrder ?? 0;
-					console.log("File tree order for " + file.sourcePathRootRelative + ": " + file.treeOrder);
 				});
 
 				tempContainer.remove();
@@ -217,6 +237,7 @@ export class Website
 		{
 			ExportLog.error(error, "Problem creating file tree");
 		}
+		await this.writeProgress("file-tree-complete", initializedFiles, this.sourceFiles.length);
 
 		return this;
 	}
@@ -232,9 +253,10 @@ export class Website
 	{
 		if (files) await this.load(files);
 
-		console.log("Creating website with files:\n" + this.sourceFiles.map(f => f.path).join("\n"));
+		console.log(`Creating website with ${this.sourceFiles.length} files.`);
 
 		await this.buildTemplate();
+		await this.writeProgress("rendering", 0, this.index.webpages.length);
 		
 		// this.refreshUpdatedFilesList();
 		
@@ -255,30 +277,58 @@ export class Website
 		let webpages = this.index.webpages;
 		webpages = webpages.filter((webpage) => 
 		{
-			return this.index.updatedFiles.includes(webpage) || this.index.newFiles.includes(webpage)
+			return this.index.isNewOrUpdated(webpage);
 		});
 
 		const downloads = AssetHandler.getDownloads(this.destination, this.exportOptions);
-		this.index.addFiles(downloads);
+		await this.index.addFiles(downloads);
 
 		
 		let progress = 0;
+		const pendingAttachmentPaths = new Set(
+			[...this.index.newFiles, ...this.index.updatedFiles]
+				.filter((file) => !(file instanceof Webpage))
+				.map((file) => file.targetPath.path)
+		);
+		const initialWorkTotal = webpages.length +
+			(this.exportOptions.combineAsSingleFile ? 0 : pendingAttachmentPaths.size);
+		ExportLog.startDocumentProgress(initialWorkTotal, webpages.length);
+		const completeDocument = async (subMessage: string): Promise<void> =>
+		{
+			progress += 1;
+			ExportLog.advanceWorkProgress(
+				1,
+				"Building Webpages",
+				subMessage,
+				"var(--interactive-accent)"
+			);
+			if (progress % 25 === 0)
+			{
+				await this.writeProgress("rendering", progress, webpages.length);
+			}
+			if (progress % 500 === 0)
+			{
+				await this.index.writeCheckpoint();
+			}
+			await Utils.delay(0);
+		};
+
 		for (const webpage of webpages)
 		{
 			if (ExportLog.isCancelled()) return;
 
-			ExportLog.progress(1, "Building Webpages", webpage.source.path);
+			ExportLog.progress(0, "Building Webpages", webpage.source.path);
 
 			const rendered = await webpage.renderDocument();
-			if (!rendered) continue;
-			await Utils.delay(0);
+			if (!rendered)
+			{
+				await completeDocument(webpage.source.path);
+				continue;
+			}
 			
 			const attachments = await webpage.getAttachments();
-			await Utils.delay(0);
-			this.index.addFiles(attachments);
-			await Utils.delay(0);
+			await this.index.addFiles(attachments);
 			const built = await webpage.build();
-			await Utils.delay(0);
 			if (built) await this.index.addFile(webpage);
 			else await this.index.removeFile(webpage);
 			// save the file and then dispose of the webpage
@@ -288,16 +338,14 @@ export class Website
 			if (this.exportOptions.autoDisposeWebpages)
 				webpage.dispose();
 
-			progress += 1;
-
-			await Utils.delay(0);
+			await completeDocument(webpage.source.path);
 		}
 	
 		if (this.exportOptions.rssOptions.enabled)
 		{
 			try
 			{
-				this.index.createRSSFeed();
+				await this.index.createRSSFeed();
 			}
 			catch (error)
 			{
@@ -308,18 +356,39 @@ export class Website
 		try
 		{
 			await this.index.finalize();
+			await this.writeProgress("finalizing", progress, webpages.length);
 		}
 		catch (error)
 		{
 			ExportLog.error(error, "Problem finalizing index");
 		}
 
-		console.log(this);
-
 		// this.refreshUpdatedFilesList();
 
 		this.validateSite();
+		await this.writeProgress("complete", progress, webpages.length);
 		return this;
+	}
+
+	private async writeProgress(stage: string, completed: number, total: number): Promise<void>
+	{
+		const progressPath = this.destination.joinString(".export-progress.json").absoluted();
+		const temporaryPath = `${progressPath.pathname}.tmp`;
+		const memory = process.memoryUsage();
+		await mkdir(progressPath.directory.pathname, { recursive: true });
+		await writeFile(temporaryPath, JSON.stringify({
+			stage,
+			completed,
+			total,
+			timestamp: Date.now(),
+			memory: {
+				rss: memory.rss,
+				heapUsed: memory.heapUsed,
+				external: memory.external,
+				arrayBuffers: memory.arrayBuffers,
+			},
+		}));
+		await rename(temporaryPath, progressPath.pathname);
 	}
 
 	/** 
@@ -432,12 +501,17 @@ export class Website
 		const file = app.vault.getFileByPath(attachedFile.pathname);
 		let path = file?.path ?? "";
 		if (!file) path = AssetHandler.mediaPath.joinString(attachedFile.fullName).path;
-		const data: Buffer | undefined = await attachedFile.readAsBuffer();
-
-		if (!data) return;
 
 		const target = new Path(path, this.destination.path)
 							.slugify(this.exportOptions.slugifyPaths);
+
+		if (file && !this.exportOptions.combineAsSingleFile)
+		{
+			return Attachment.fromSource(target, file, this.exportOptions);
+		}
+
+		const data: Buffer | undefined = await attachedFile.readAsBuffer();
+		if (!data) return;
 
 		const attachment = new Attachment(data, target, file, this.exportOptions);
 		if (!attachment.sourcePath) attachment.sourcePath = attachedFile.pathname;

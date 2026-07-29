@@ -84,16 +84,38 @@ export namespace Utils
 		ExportLog.progress(0, "Saving files to disk", "...", "var(--color-green)");
 
 		let complete = 0;
-		
-		await Promise.all(files.map(async (file, i) => {
-			try {
-				complete++;
-				ExportLog.progress(1, "Saving files to disk", "Saved: " + file.filename, "var(--color-green)");
-				await file.download();
-			} catch (e) {
-				ExportLog.error(e, "Could not save file: " + file.filename);
+
+		const concurrency = Math.min(2, files.length);
+		let nextIndex = 0;
+		const workers = Array.from({ length: concurrency }, async () =>
+		{
+			while (nextIndex < files.length)
+			{
+				const file = files[nextIndex++];
+				let saved = false;
+				try
+				{
+					await file.download();
+					saved = true;
+				}
+				catch (e)
+				{
+					ExportLog.error(e, "Could not save file: " + file.filename);
+				}
+				finally
+				{
+					complete++;
+					ExportLog.advanceWorkProgress(
+						1,
+						"Saving files to disk",
+						`${saved ? "Saved" : "Failed"} (${complete}/${files.length}): ${file.filename}`,
+						"var(--color-green)"
+					);
+				}
 			}
-		}));
+		});
+
+		await Promise.all(workers);
 	}
 
 	//export async function  that awaits until a condition is met

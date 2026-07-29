@@ -3,5 +3,8 @@
   "private": true,
   "type": "module",
   "description": "Companion server for Obsidian Webpage Export shopping basket checkout.",
+  "engines": {
+    "node": ">=24"
+  },
   "dependencies": {}
 }

@@ -176,6 +176,10 @@ export class WebsiteOptions
 export class WebsiteData
 {
 	ignoreMetadata: boolean = false;
+	metadataShards?: {
+		webpages: string;
+		fileInfo: string;
+	};
 	webpages: {[targetPath: string]: WebpageData} = {};
 	fileInfo: {[targetPath: string]: FileData} = {};
 	sourceToTarget: {[sourcePath: string]: string} = {};

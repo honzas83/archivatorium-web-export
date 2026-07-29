@@ -15,6 +15,8 @@ import { FileData, TagTreeItemData, WebpageData, WebsiteData } from "src/shared/
 import { Utils } from "src/plugin/utils/utils";
 import { Shared } from "src/shared/shared";
 import { WebpageTemplate } from "./webpage-template";
+import { SearchCorpus } from "./search-corpus";
+import { mkdir, rename, writeFile } from "fs/promises";
 
 export class Index
 {
@@ -22,6 +24,15 @@ export class Index
 	private sourceToWebpage: Map<string, Webpage> = new Map();
 	private sourceToAttachment: Map<string, Attachment> = new Map();
 	private exportOptions: ExportPipelineOptions;
+	private newFilePaths: Set<string> = new Set();
+	private updatedFilePaths: Set<string> = new Set();
+	private allFilePaths: Set<string> = new Set();
+	private shownInTreePaths: Set<string> = new Set();
+	private webpagePaths: Set<string> = new Set();
+	private attachmentPaths: Set<string> = new Set();
+	private oldFileData: Map<string, FileData> = new Map();
+	private oldWebpageData: Map<string, WebpageData> = new Map();
+	private searchCorpus: SearchCorpus;
 
 	private stopWords = ["a", "about", "actually", "almost", "also", "although", "always", "am", "an", "and", "any", "are", "as", "at", "be", "became", "become", "but", "by", "can", "could", "did", "do", "does", "each", "either", "else", "for", "from", "had", "has", "have", "hence", "how", "i", "if", "in", "is", "it", "its", "just", "may", "maybe", "me", "might", "mine", "must", "my", "mine", "must", "my", "neither", "nor", "not", "of", "oh", "ok", "when", "where", "whereas", "wherever", "whenever", "whether", "which", "while", "who", "whom", "whoever", "whose", "why", "will", "with", "within", "without", "would", "yes", "yet", "you", "your"];
 	private minisearchOptions = 
@@ -45,7 +56,7 @@ export class Index
 	public rssURL: Path;
 	public rssAsset: AssetLoader | undefined = undefined;
 
-	public deletedFiles: string[] = [];
+	public deletedFiles: Set<string> = new Set();
 	public newFiles: Attachment[] = [];
 	public updatedFiles: Attachment[] = [];
 	public allFiles: Attachment[] = [];
@@ -54,6 +65,7 @@ export class Index
 	{
 		this.website = website;
 		this.exportOptions = options;
+		this.searchCorpus = new SearchCorpus(this.website.destination, AssetHandler.libraryPath);
 
 		try
 		{
@@ -63,10 +75,27 @@ export class Index
 			const metadata = await metadataPath.readAsString();
 			if (metadata) 
 			{
-				this.oldWebsiteData = JSON.parse(metadata) as WebsiteData;
-				this.websiteData = JSON.parse(metadata) as WebsiteData;
+				const parsedWebsiteData = JSON.parse(metadata) as WebsiteData;
+				if (parsedWebsiteData.metadataShards)
+				{
+					const libraryPath = this.website.destination.join(AssetHandler.libraryPath);
+					const [webpages, fileInfo] = await Promise.all([
+						libraryPath.joinString(parsedWebsiteData.metadataShards.webpages).readAsString(),
+						libraryPath.joinString(parsedWebsiteData.metadataShards.fileInfo).readAsString(),
+					]);
+					parsedWebsiteData.webpages = webpages ? JSON.parse(webpages) : {};
+					parsedWebsiteData.fileInfo = fileInfo ? JSON.parse(fileInfo) : {};
+				}
+				this.oldWebsiteData = parsedWebsiteData;
+				this.websiteData = parsedWebsiteData;
+				this.oldFileData = new Map(Object.entries(parsedWebsiteData.fileInfo ?? {}));
+				this.oldWebpageData = new Map(Object.entries(parsedWebsiteData.webpages ?? {}));
+				for (const [targetPath, webpageData] of this.oldWebpageData)
+				{
+					if (!this.oldFileData.has(targetPath)) this.oldFileData.set(targetPath, webpageData);
+				}
 
-				this.deletedFiles = this.oldWebsiteData.allFiles ?? [];
+				this.deletedFiles = new Set(this.oldWebsiteData.allFiles ?? []);
 			}
 			else
 			{
@@ -118,7 +147,12 @@ export class Index
 			ExportLog.warning(e, "Failed to load metadata.json. Recreating metadata.");
 		}
 
+		if (this.exportOptions.searchOptions.serverSide)
+		{
+			this.minisearch = undefined;
+		}
 		// load current index or create a new one if it doesn't exist
+		else
 		try
 		{			
 			const indexPath = this.website.destination.join(AssetHandler.libraryPath).joinString(Shared.searchIndexFileName);
@@ -141,26 +175,40 @@ export class Index
 
 	public async finalize()
 	{
+		this.sortFiles();
+		if (this.exportOptions.searchOptions.serverSide)
+		{
+			const browserIndexPath = this.website.destination.join(AssetHandler.libraryPath).joinString(Shared.searchIndexFileName);
+			await browserIndexPath.delete();
+		}
 
-		this.websiteData.shownInTree = this.attachmentsShownInTree.map((attachment) => attachment.targetPath.path);
-		this.websiteData.allFiles = this.allFiles.map((file) => file.targetPath.path);
+		this.updateCurrentFileLists();
 
 		// remove deleted files from website data
 		for (const file of this.deletedFiles)
 		{
 			delete this.websiteData.fileInfo[file];
 			delete this.websiteData.webpages[file];
-
-			this.websiteData.attachments.remove(file);
-			this.websiteData.allFiles.remove(file);
-			this.websiteData.shownInTree.remove(file);
-
-			const webpages = Object.values(this.websiteData.webpages);
-			for (const webpage of webpages)
+			if (this.exportOptions.searchOptions.serverSide && file.toLowerCase().endsWith(".html"))
 			{
-				webpage.attachments.remove(file);
-				webpage.backlinks.remove(file);
+				await this.searchCorpus.remove(file);
 			}
+		}
+		this.websiteData.attachments = this.websiteData.attachments.filter((file) => !this.deletedFiles.has(file));
+		this.websiteData.allFiles = this.websiteData.allFiles.filter((file) => !this.deletedFiles.has(file));
+		this.websiteData.shownInTree = this.websiteData.shownInTree.filter((file) => !this.deletedFiles.has(file));
+		this.websiteData.sourceToTarget = Object.fromEntries(
+			Object.entries(this.websiteData.sourceToTarget)
+				.filter(([, targetPath]) => !this.deletedFiles.has(targetPath))
+		);
+		this.websiteData.metadataValueToTarget = Object.fromEntries(
+			Object.entries(this.websiteData.metadataValueToTarget)
+				.filter(([, targetPath]) => !this.deletedFiles.has(targetPath))
+		);
+		for (const webpage of Object.values(this.websiteData.webpages))
+		{
+			webpage.attachments = webpage.attachments.filter((file) => !this.deletedFiles.has(file));
+			webpage.backlinks = webpage.backlinks.filter((file) => !this.deletedFiles.has(file));
 		}
 
 		if (!this.exportOptions.combineAsSingleFile)
@@ -172,6 +220,64 @@ export class Index
 		}
 
 		this.websiteData.tagTree = this.buildTagTree();
+	}
+
+	private updateCurrentFileLists(): void
+	{
+		this.websiteData.shownInTree = this.attachmentsShownInTree.map((attachment) => attachment.targetPath.path);
+		this.websiteData.allFiles = this.allFiles.map((file) => file.targetPath.path);
+	}
+
+	public async writeCheckpoint(): Promise<void>
+	{
+		if (!this.exportOptions.searchOptions.serverSide) return;
+		this.updateCurrentFileLists();
+		await this.saveWebsiteData();
+	}
+
+	public async saveWebsiteData(): Promise<void>
+	{
+		const websiteDataPath = AssetHandler.generateSavePath("metadata.json", AssetType.Other, this.website.destination);
+		if (!this.exportOptions.combineAsSingleFile)
+		{
+			const webpagesPath = AssetHandler.generateSavePath(Shared.metadataPagesFileName, AssetType.Other, this.website.destination);
+			const fileInfoPath = AssetHandler.generateSavePath(Shared.metadataFilesFileName, AssetType.Other, this.website.destination);
+			const { webpages, fileInfo, ...coreData } = this.websiteData;
+			coreData.metadataShards = {
+				webpages: Shared.metadataPagesFileName,
+				fileInfo: Shared.metadataFilesFileName,
+			};
+			await Promise.all([
+				this.writeAtomically(webpagesPath, JSON.stringify(webpages, Index.compactMetadataReplacer)),
+				this.writeAtomically(fileInfoPath, JSON.stringify(fileInfo, Index.compactMetadataReplacer)),
+			]);
+			await this.writeAtomically(
+				websiteDataPath,
+				JSON.stringify(coreData, Index.compactMetadataReplacer)
+			);
+			return;
+		}
+
+		await this.writeAtomically(
+			websiteDataPath,
+			JSON.stringify(this.websiteData, Index.compactMetadataReplacer)
+		);
+	}
+
+	public async saveIndexData(): Promise<void>
+	{
+		if (!this.minisearch) return;
+		const indexDataPath = AssetHandler.generateSavePath("search-index.json", AssetType.Other, this.website.destination);
+		await this.writeAtomically(indexDataPath, JSON.stringify(this.minisearch));
+	}
+
+	private async writeAtomically(targetPath: Path, data: string): Promise<void>
+	{
+		const absolutePath = targetPath.absoluted().pathname;
+		const temporaryPath = `${absolutePath}.tmp`;
+		await mkdir(targetPath.absoluted().directory.pathname, { recursive: true });
+		await writeFile(temporaryPath, data);
+		await rename(temporaryPath, absolutePath);
 	}
 
 	private buildTagTree(): TagTreeItemData[]
@@ -293,11 +399,13 @@ export class Index
 			const title = page.title;
 			const url = Path.joinStrings(this.exportOptions.rssOptions.siteUrl ?? "", page.targetPath.path).path;
 			const guid = page.source.path;
-			const date = page.outputData.rssDate ?? new Date(page.source.stat.mtime);
-			author = page.outputData.author ?? author;
-			const media = page.outputData.coverImageURL ?? "";
+			const outputData = page.generatedOutputData;
+			const storedData = this.websiteData.webpages[page.targetPath.path];
+			const date = outputData?.rssDate ?? new Date(page.source.stat.mtime);
+			author = outputData?.author ?? storedData?.author ?? author;
+			const media = outputData?.coverImageURL ?? storedData?.coverImageURL ?? "";
 			const hasMedia = media != "";
-			const description = page.outputData.descriptionOrShortenedContent;
+			const description = outputData?.descriptionOrShortenedContent ?? storedData?.description ?? "";
 
 			this.rssFeed.item(
 			{ 
@@ -328,7 +436,7 @@ export class Index
 			let newItems = Array.from(rssDocNew.querySelectorAll("item"));
 
 			// filter out deleted files and remove duplicated items favoring the new rss
-			oldItems = oldItems.filter((oldItem) => !this.deletedFiles.includes(oldItem.querySelector("guid")?.textContent ?? ""));
+			oldItems = oldItems.filter((oldItem) => !this.deletedFiles.has(oldItem.querySelector("guid")?.textContent ?? ""));
 			oldItems = oldItems.filter((oldItem) => !newItems.some((newItem) => newItem.querySelector("guid")?.textContent == oldItem.querySelector("guid")?.textContent));
 			
 			// remove all items from new rss
@@ -344,10 +452,10 @@ export class Index
 		}
 
 		const rssAsset = new Attachment(rssXML, this.rssPath, null, this.exportOptions);
-		this.addFile(rssAsset);
+		await this.addFile(rssAsset);
 	}
 
-	public async addFile(file: Attachment | Webpage)
+	public async addFile(file: Attachment | Webpage, updateData: boolean = true)
 	{
 		// determine if the file is new, updated, or unchanged
 		let updatedFile = false;
@@ -355,7 +463,11 @@ export class Index
 		const key = file.targetPath.path;
 		if(!this.hadFile(key))
 		{
-			this.newFiles.push(file);
+			if (!this.newFilePaths.has(key))
+			{
+				this.newFilePaths.add(key);
+				this.newFiles.push(file);
+			}
 			newFile = true;
 		}
 		else
@@ -365,12 +477,16 @@ export class Index
 			{
 				if (oldData.modifiedTime != file.sourceStat.mtime || oldData.sourceSize != file.sourceStat.size)
 				{
-					this.updatedFiles.push(file);
+					if (!this.updatedFilePaths.has(key))
+					{
+						this.updatedFilePaths.add(key);
+						this.updatedFiles.push(file);
+					}
 					updatedFile = true;
 				}
 			}
 
-			this.deletedFiles.remove(file.targetPath.path);
+			this.deletedFiles.delete(file.targetPath.path);
 
 			// if we didn't update the file make sure we don't delete the file's attachments
 			// if we did update the file we don't need to worry, because the attachments will be recreated
@@ -381,26 +497,34 @@ export class Index
 				{
 					for (const attachment of oldWebpage.attachments)
 					{
-						this.deletedFiles.remove(attachment);
+						this.deletedFiles.delete(attachment);
 					}
 				}
 			}
 		}
 
 		// add the file to the list of all files
-		if (!this.allFiles.includes(file))
+		if (!this.allFilePaths.has(key))
 		{
+			this.allFilePaths.add(key);
 			this.allFiles.push(file);
-			this.allFiles.sort((a, b) => (b.source?.stat.mtime ?? 0) - (a.source?.stat.mtime ?? 0));
 		}
 
 		// add the file to the list of files shown in the tree
-		if (file.showInTree && !this.attachmentsShownInTree.includes(file))
+		if (file.showInTree && !this.shownInTreePaths.has(key))
+		{
+			this.shownInTreePaths.add(key);
 			this.attachmentsShownInTree.push(file);
+		}
 
 		if (file instanceof Webpage && file.sourcePath && !this.sourceToWebpage.has(file.sourcePath))
 		{
 			this.sourceToWebpage.set(file.sourcePath, file);
+		}
+		if (file instanceof Webpage && !this.webpagePaths.has(key))
+		{
+			this.webpagePaths.add(key);
+			this.webpages.push(file);
 		}
 
 		if (file instanceof Attachment && file.sourcePath && !this.sourceToAttachment.has(file.sourcePath))
@@ -409,7 +533,7 @@ export class Index
 		}
 
 		// only update the index if the file is new or updated
-		if (newFile || updatedFile)
+		if (updateData && (newFile || updatedFile))
 		{
 			if (file instanceof Webpage)
 			{
@@ -426,7 +550,7 @@ export class Index
 	{
 		for (const file of files)
 		{
-			this.addFile(file);
+			await this.addFile(file);
 		}
 	}
 
@@ -446,7 +570,7 @@ export class Index
 	{
 		for (const file of files)
 		{
-			this.removeFile(file);
+			await this.removeFile(file);
 		}
 	}
 
@@ -483,17 +607,17 @@ export class Index
 
 	public hadFile(targetPath: string): boolean
 	{
-		return this.oldWebsiteData?.fileInfo[targetPath] != undefined;
+		return this.oldFileData.has(targetPath);
 	}
 
 	public getOldFile(targetPath: string): FileData | undefined
 	{
-		return this.oldWebsiteData?.fileInfo[targetPath];
+		return this.oldFileData.get(targetPath);
 	}
 
 	public getOldWebpage(targetPath: string): WebpageData | undefined
 	{
-		return this.oldWebsiteData?.webpages[targetPath];
+		return this.oldWebpageData.get(targetPath);
 	}
 
 	public async applyToOldWebpages(callback: (document: Document, oldData: WebpageData) => Promise<any>)
@@ -502,11 +626,11 @@ export class Index
 
 		if (this.oldWebsiteData)
 		{
-			const webpages = Object.entries(this.oldWebsiteData.webpages);
+			const webpages = Array.from(this.oldWebpageData.entries());
 			for (const [path, data] of webpages)
 			{
 				// skip files that were deleted
-				if (this.deletedFiles.includes(path)) continue;
+				if (this.deletedFiles.has(path)) continue;
 
 				const filePath = new Path(path, this.website.destination.path);
 				const fileData = await filePath.readAsBuffer();
@@ -571,6 +695,13 @@ export class Index
 
 			this.websiteData.webpages[webpageInfo.exportPath] = webpageInfo;
 			if (!this.websiteData.metadataValueToTarget) this.websiteData.metadataValueToTarget = {};
+			for (const [metadataValue, targetPath] of Object.entries(this.websiteData.metadataValueToTarget))
+			{
+				if (targetPath === webpageInfo.exportPath)
+				{
+					delete this.websiteData.metadataValueToTarget[metadataValue];
+				}
+			}
 			for (const metadataValue of webpage.outputData.metadataRedirectValues)
 			{
 				if (!this.websiteData.metadataValueToTarget[metadataValue])
@@ -592,6 +723,26 @@ export class Index
 
 	private async addWebpageToMinisearch(webpage: Webpage)
 	{
+		const headersInfo = [...await webpage.outputData.renderedHeadings];
+		if (headersInfo.length > 0 && headersInfo[0].level == 1 && headersInfo[0].heading == webpage.title) headersInfo.shift();
+		const headers = headersInfo.map((header) => header.heading);
+		const content = `${webpage.outputData.metadataSearchText} ${webpage.outputData.description} ${webpage.outputData.searchContent}`;
+
+		if (this.exportOptions.searchOptions.serverSide)
+		{
+			await this.searchCorpus.write({
+				path: webpage.targetPath.path,
+				sourcePath: webpage.sourcePath ?? "",
+				title: webpage.title,
+				metadata: webpage.outputData.metadataSearchText,
+				aliases: webpage.outputData.aliases,
+				headers,
+				tags: webpage.outputData.allTags,
+				content,
+			});
+			return;
+		}
+
 		if (this.minisearch)
 		{
 			const webpagePath = webpage.targetPath.path;
@@ -600,10 +751,6 @@ export class Index
 				this.minisearch.discard(webpagePath);
 			}
 
-			const headersInfo = await webpage.outputData.renderedHeadings;
-			if (headersInfo.length > 0 && headersInfo[0].level == 1 && headersInfo[0].heading == webpage.title) headersInfo.shift();
-			const headers = headersInfo.map((header) => header.heading);
-
 			this.minisearch.add({
 				title: webpage.title,
 				metadata: webpage.outputData.metadataSearchText,
@@ -611,19 +758,13 @@ export class Index
 				headers: headers,
 				tags: webpage.outputData.allTags,
 				path: webpagePath,
-				content: `${webpage.outputData.metadataSearchText} ${webpage.outputData.description} ${webpage.outputData.searchContent}`,
+				content,
 			});
 		}
 	}
 
 	private async updateWebpage(webpage: Webpage)
 	{
-		if (!this.webpages.includes(webpage))
-		{
-			this.webpages.push(webpage);
-			this.webpages.sort((a, b) => b.source.stat.mtime - a.source.stat.mtime);
-		}
-
 		await this.addWebpageToWebsiteData(webpage);
 		await this.addWebpageToMinisearch(webpage);
 	}
@@ -664,16 +805,33 @@ export class Index
 	{
 		this.addAttachmentToWebsiteData(attachment);
 
-		if (!this.attachments.includes(attachment))
+		const path = attachment.targetPath.path;
+		if (!this.attachmentPaths.has(path))
 		{
+			this.attachmentPaths.add(path);
 			this.attachments.push(attachment);
-			this.attachments.sort((a, b) => (b.source?.stat.mtime ?? 0) - (a.source?.stat.mtime ?? 0));
 		}
+	}
+
+	public isNewOrUpdated(file: Attachment): boolean
+	{
+		const path = file.targetPath.path;
+		return this.newFilePaths.has(path) || this.updatedFilePaths.has(path);
+	}
+
+	public sortFiles(): void
+	{
+		const newestFirst = (a: Attachment, b: Attachment) =>
+			(b.source?.stat.mtime ?? 0) - (a.source?.stat.mtime ?? 0);
+		this.allFiles.sort(newestFirst);
+		this.attachments.sort(newestFirst);
+		this.attachmentsShownInTree.sort(newestFirst);
+		this.webpages.sort((a, b) => b.source.stat.mtime - a.source.stat.mtime);
 	}
 
 	private removeWebpage(webpage: Webpage)
 	{
-		if (webpage.sourcePath && !this.sourceToWebpage.has(webpage.sourcePath))
+		if (webpage.sourcePath && this.sourceToWebpage.has(webpage.sourcePath))
 		{
 			this.sourceToWebpage.delete(webpage.sourcePath);
 		}
@@ -693,7 +851,7 @@ export class Index
 
 	private removeAttachment(attachment: Attachment)
 	{
-		if (attachment.sourcePath && !this.sourceToAttachment.has(attachment.sourcePath))
+		if (attachment.sourcePath && this.sourceToAttachment.has(attachment.sourcePath))
 		{
 			this.sourceToAttachment.delete(attachment.sourcePath);
 		}

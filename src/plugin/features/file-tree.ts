@@ -77,7 +77,7 @@ export class FileTree extends Tree
 				const isFolder = i < pathSections.length - 1 || file.isDirectory; 
                 const titleForLookup = section.basename; // Use basename for folder title lookup initially
 
-				let child = currentParentNode.children.find(sibling => sibling.dataRef == section.path) as FileTreeItem | undefined;
+				let child = this.pathToItem.get(section.path);
 				
 				if (child == undefined)
 				{

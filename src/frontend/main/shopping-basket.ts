@@ -60,7 +60,7 @@ export class ShoppingBasket {
 		this.addButtonEl.setAttribute("title", "Add current search to basket");
 		this.addButtonEl.innerHTML =
 			'<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" class="svg-icon"><path d="M5 7h14l-1.5 13h-11L5 7Z"></path><path d="M8 7a4 4 0 0 1 8 0"></path><path d="M12 11v6"></path><path d="M9 14h6"></path></svg><span>Add search</span>';
-		this.addButtonEl.addEventListener("click", () => this.addCurrentSearch());
+		this.addButtonEl.addEventListener("click", () => void this.addCurrentSearch());
 		toolbarEl.appendChild(this.addButtonEl);
 
 		this.addDocumentButtonEl = document.createElement("button");
@@ -113,14 +113,24 @@ export class ShoppingBasket {
 		this.render();
 	}
 
-	private addCurrentSearch(): void {
+	private async addCurrentSearch(): Promise<void> {
 		const query = this.search.getCurrentQuery();
 		if (!query) {
 			new Notice("Run a search first.");
 			return;
 		}
 
-		const snapshot = this.search.getMatchesForQuery(query);
+		this.addButtonEl.disabled = true;
+		let snapshot: BasketSearchSnapshot;
+		try {
+			snapshot = await this.search.getMatchesForQuery(query);
+		} catch (error) {
+			console.error("Failed to add search to basket:", error);
+			new Notice("The search server is not available.");
+			return;
+		} finally {
+			this.addButtonEl.disabled = false;
+		}
 		if (snapshot.items.length === 0) {
 			new Notice("No Markdown documents matched this search.");
 			return;

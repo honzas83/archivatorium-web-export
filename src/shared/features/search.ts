@@ -6,6 +6,9 @@ import {
 } from "./feature-options-base";
 
 export class SearchOptions extends InsertedFeatureOptionsWithTitle {
+	serverSide: boolean = false;
+	searchEndpoint: string = "/api/search";
+
 	constructor() {
 		super();
 		this.featureId = "search";

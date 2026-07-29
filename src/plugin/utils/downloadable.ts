@@ -1,9 +1,13 @@
 import { ExportPipelineOptions } from "src/plugin/website/pipeline-options.js";
 import { Path } from "./path";
-import { FileStats, TFile } from "obsidian";
+import { FileStats, FileSystemAdapter, TFile } from "obsidian";
+import { copyFile, link, rename, unlink } from "fs/promises";
+import { constants } from "fs";
 
 export class Attachment
 {
+	private static temporaryLinkCounter: number = 0;
+
 	/**
 	 * The raw data of the file
 	 */
@@ -12,6 +16,7 @@ export class Attachment
 	private _sourcePath: string | undefined;
 	private _sourcePathRootRelative: string | undefined;
 	private _targetPath: Path;
+	private _copySourceOnDownload: boolean = false;
 	public sourceStat: FileStats;
 	public exportOptions: ExportPipelineOptions;
 	public showInTree: boolean = false;
@@ -63,6 +68,13 @@ export class Attachment
 		this.targetPath = target;
 	}
 
+	public static fromSource(target: Path, source: TFile, options: ExportPipelineOptions): Attachment
+	{
+		const attachment = new Attachment(Buffer.alloc(0), target, source, options);
+		attachment._copySourceOnDownload = true;
+		return attachment;
+	}
+
 	private removeRootFromPath(path: Path, allowSlugify: boolean = true)
 	{
 		// remove the export root from the target path
@@ -81,7 +93,72 @@ export class Attachment
 			throw new Error("(working dir) Target should be a relative path with the working directory set to the root: " + this.targetPath.absoluted().path);
 		}
 
+		if (this._copySourceOnDownload && this.source)
+		{
+			const adapter = app.vault.adapter;
+			if (adapter instanceof FileSystemAdapter)
+			{
+				await this.targetPath.createDirectory();
+				await Attachment.linkOrCopy(
+					adapter.getFullPath(this.source.path),
+					this.targetPath.absoluted().pathname
+				);
+				return;
+			}
+
+			// Non-filesystem adapters cannot expose a source path. Keep memory bounded
+			// by reading only this file immediately before it is written.
+			const sourceData = Buffer.from(await app.vault.readBinary(this.source));
+			await this.targetPath.write(sourceData);
+			return;
+		}
+
 		const data = this.data instanceof Buffer ? this.data : Buffer.from(this.data.toString());
 		await this.targetPath.write(data);
+	}
+
+	private static async linkOrCopy(sourcePath: string, targetPath: string): Promise<void>
+	{
+		const temporaryPath =
+			`${targetPath}.hardlink-${process.pid}-${Date.now()}-${Attachment.temporaryLinkCounter++}`;
+		try
+		{
+			await link(sourcePath, temporaryPath);
+			await rename(temporaryPath, targetPath);
+			// POSIX permits rename to be a no-op when both names already reference
+			// the same inode, so clean up the temporary name explicitly.
+			await Attachment.unlinkIfExists(temporaryPath);
+			return;
+		}
+		catch (error: any)
+		{
+			await Attachment.unlinkIfExists(temporaryPath);
+			const fallbackCodes = new Set([
+				"EXDEV",
+				"EPERM",
+				"EACCES",
+				"EMLINK",
+				"ENOSYS",
+				"ENOTSUP",
+				"EOPNOTSUPP",
+			]);
+			if (!fallbackCodes.has(error?.code)) throw error;
+		}
+
+		// COPYFILE_FICLONE still avoids a physical copy on filesystems supporting
+		// copy-on-write, but transparently falls back to a normal copy elsewhere.
+		await copyFile(sourcePath, targetPath, constants.COPYFILE_FICLONE);
+	}
+
+	private static async unlinkIfExists(path: string): Promise<void>
+	{
+		try
+		{
+			await unlink(path);
+		}
+		catch (error: any)
+		{
+			if (error?.code !== "ENOENT") throw error;
+		}
 	}
 }

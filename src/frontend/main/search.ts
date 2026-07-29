@@ -32,9 +32,12 @@ export interface BasketSearchSnapshot
 
 export class Search
 {
-	private index: MiniSearch; // MiniSearch
+	private index: MiniSearch | undefined;
 	private input: HTMLInputElement;
 	private container: HTMLElement;
+	private serverSide: boolean = false;
+	private searchEndpoint: string = "/api/search";
+	private searchRequestId: number = 0;
 	private static readonly inlineMarkClass = "search-mark";
 	private static readonly tagMarkClass = "search-tag-mark";
 
@@ -42,7 +45,7 @@ export class Search
 	private dedicatedSearchResultsList: HTMLElement;
 	
 
-	public search(query: string, type: SearchType = allSearch)
+	public async search(query: string, type: SearchType = allSearch)
 	{
 		if (query.length == 0)
 		{
@@ -61,9 +64,9 @@ export class Search
 			this.input.style.color = "";
 		}
 
-		let results = this.runSearchQuery(query, type);
-
-		console.log("Search results", results);
+		const requestId = ++this.searchRequestId;
+		let results = await this.runSearchQuery(query, type, 200);
+		if (requestId !== this.searchRequestId) return;
 
 		// clamp results to at most the top 50
 		if (results.length > 50) results.splice(50);
@@ -87,7 +90,7 @@ export class Search
 			{
 				const headers: string[] = [];
 				let breakEarly = false;
-				for (const match in result.match)
+				for (const match in (result.match ?? {}))
 				{
 					if (result.match[match].includes("headers"))
 					{
@@ -173,11 +176,11 @@ export class Search
 		return this.input?.value?.trim() ?? "";
 	}
 
-	public getMatchesForQuery(queryString: string): BasketSearchSnapshot
+	public async getMatchesForQuery(queryString: string): Promise<BasketSearchSnapshot>
 	{
 		const parsed = this.parseQueryFilter(queryString);
 		const type = parsed.type ?? allSearch;
-		const results = this.runSearchQuery(parsed.value, type);
+		const results = await this.runSearchQuery(parsed.value, type, 5000);
 		const seen = new Set<string>();
 		const items: BasketSearchItem[] = [];
 
@@ -185,7 +188,7 @@ export class Search
 		{
 			const exportPath = this.getResultPath(result);
 			const webpage = this.getResultWebpage(result);
-			const sourcePath = webpage?.sourcePath ?? "";
+			const sourcePath = String((result as any).sourcePath ?? webpage?.sourcePath ?? "");
 
 			if (!exportPath || !sourcePath || seen.has(sourcePath)) continue;
 			seen.add(sourcePath);
@@ -202,7 +205,7 @@ export class Search
 		};
 	}
 
-	private runSearchQuery(query: string, type: SearchType): Array<SearchResult>
+	private async runSearchQuery(query: string, type: SearchType, limit: number): Promise<Array<SearchResult>>
 	{
 		const searchFields: string[] = [];
 		if (type & SearchType.Title) searchFields.push('title');
@@ -213,16 +216,27 @@ export class Search
 		if (type & SearchType.Content) searchFields.push('content');
 		if (type & SearchType.Metadata) searchFields.push('metadata');
 
-		console.log(type & SearchType.Title, type & SearchType.Aliases, type & SearchType.Headers, type & SearchType.Tags, type & SearchType.Path, type & SearchType.Content, type & SearchType.Metadata);
-		const searchQuery = this.expandMetadataQuery(query);
+		const searchQuery = type === SearchType.Tags ? query : this.expandMetadataQuery(query);
+		if (this.serverSide)
+		{
+			const response = await fetch(this.searchEndpoint, {
+				method: "POST",
+				credentials: "same-origin",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ query: searchQuery, type, limit }),
+			});
+			if (!response.ok) throw new Error(`Search server returned ${response.status}.`);
+			const data = await response.json();
+			return Array.isArray(data.items) ? data.items : [];
+		}
 
-		let results: Array<SearchResult> = this.index.search(searchQuery,
+		let results: Array<SearchResult> = this.index?.search(searchQuery,
 		{
 			prefix: true,
 			fuzzy: false,
 			boost: { metadata: 8, title: 2, aliases: 1.8, headers: 1.5, tags: 1.3, path: 1.1 },
 			fields: searchFields
-		});
+		}) ?? [];
 
 		if (type === SearchType.Tags)
 		{
@@ -273,43 +287,16 @@ export class Search
 		return normalized;
 	}
 
-	public searchParseFilters(queryString: string)
+	public async searchParseFilters(queryString: string)
 	{
 		const parsed = this.parseQueryFilter(queryString);
 		const filterValue = parsed.value;
-
-		if (parsed.type === SearchType.Content)
-		{
-			this.search(filterValue, SearchType.Content);
-		}
-		else if (parsed.type === SearchType.Title)
-		{
-			this.search(filterValue, SearchType.Title);
-		}
-		else if (parsed.type === SearchType.Path)
-		{
-			this.search(filterValue, SearchType.Path);
-		}
-		else if (parsed.type === SearchType.Headers)
-		{
-			this.search(filterValue, SearchType.Headers);
-		}
-		else if (parsed.type === SearchType.Tags)
-		{
-			this.search(filterValue, SearchType.Tags);
-		}
-		else if (parsed.type === SearchType.Aliases)
-		{
-			this.search(filterValue, SearchType.Aliases);
-		}
-		else
-		{
-			this.search(filterValue);
-		}
+		await this.search(filterValue, parsed.type ?? allSearch);
 	}
 
 	public clear()
 	{
+		this.searchRequestId++;
 		this.container?.classList.remove("has-content");
 		this.input.value = "";
 		this.clearCurrentDocumentSearch();
@@ -326,22 +313,28 @@ export class Search
 
 		ObsidianSite.metadata.featureOptions.search.insertFeature(document.body, this.container);
 
-		const indexResp = await ObsidianSite.fetch(Shared.libFolderName + '/search-index.json');
-		if (!indexResp?.ok)
+		this.serverSide = ObsidianSite.metadata.featureOptions.search.serverSide === true;
+		this.searchEndpoint = ObsidianSite.metadata.featureOptions.search.searchEndpoint ?? "/api/search";
+
+		if (!this.serverSide)
 		{
-			console.error("Failed to fetch search index");
-			return;
-		}
-		const indexJSON = await indexResp.json();
-		try
-		{
-			// @ts-ignore
-			this.index = MiniSearch.loadJS(indexJSON, { fields: ['title', 'metadata', 'aliases', 'headers', 'tags', 'path', 'content'] });
-		}
-		catch (e)
-		{
-			console.error("Failed to load search index: ", e);
-			return;
+			const indexResp = await ObsidianSite.fetch(Shared.libFolderName + '/search-index.json');
+			if (!indexResp?.ok)
+			{
+				console.error("Failed to fetch search index");
+				return;
+			}
+			const indexJSON = await indexResp.json();
+			try
+			{
+				// @ts-ignore
+				this.index = MiniSearch.loadJS(indexJSON, { fields: ['title', 'metadata', 'aliases', 'headers', 'tags', 'path', 'content'] });
+			}
+			catch (e)
+			{
+				console.error("Failed to load search index: ", e);
+				return;
+			}
 		}
 
 		const inputClear = document.querySelector('#search-clear-button');
@@ -350,7 +343,7 @@ export class Search
 			this.clear();
 		});
 
-		this.input.addEventListener('input', (event) => 
+		this.input.addEventListener('input', async (event) =>
 		{
 			const query = (event.target as HTMLInputElement)?.value ?? "";
 			if (query.length == 0)
@@ -359,7 +352,14 @@ export class Search
 				return;
 			}
 			
-			this.searchParseFilters(query);
+			try
+			{
+				await this.searchParseFilters(query);
+			}
+			catch (error)
+			{
+				console.error("Search failed:", error);
+			}
 		});
 
 		if (!ObsidianSite.fileTree)

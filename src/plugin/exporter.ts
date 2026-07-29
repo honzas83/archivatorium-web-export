@@ -18,10 +18,10 @@ export class HTMLExporter
 			return await modal.open();
 		}
 		
-		const files = Settings.exportOptions.filesToExport[0];
 		const path = overrideExportPath ?? new Path(Settings.exportOptions.exportPath);
+		const hasFiles = (overrideFiles ?? Settings.getFilesToExport()).length > 0;
 
-		if ((files.length == 0 && overrideFiles == undefined) || !path.exists || !path.isAbsolute || !path.isDirectory)
+		if (!hasFiles || !path.exists || !path.isAbsolute || !path.isDirectory)
 		{
 			new Notice("Please set the export path and files to export in the settings first.", 5000);
 			const modal = new ExportModal();
@@ -64,7 +64,7 @@ export class HTMLExporter
 			if (deleteOld)
 			{
 				let i = 0;
-				ExportLog.addToProgressCap(website.index.deletedFiles.length / 2);
+				ExportLog.addToProgressCap(website.index.deletedFiles.size / 2);
 				for (const dFile of website.index.deletedFiles)
 				{
 					const path = new Path(dFile, destination.path);
@@ -93,15 +93,25 @@ export class HTMLExporter
 				}
 				else
 				{
-					await Utils.downloadAttachments(website.index.newFiles.filter((f) => !(f instanceof Webpage)));
-					await Utils.downloadAttachments(website.index.updatedFiles.filter((f) => !(f instanceof Webpage)));
+					const newAttachments = website.index.newFiles.filter((f) => !(f instanceof Webpage));
+					const updatedAttachments = website.index.updatedFiles.filter((f) => !(f instanceof Webpage));
+					ExportLog.setRemainingWorkItems(newAttachments.length + updatedAttachments.length);
+					await Utils.downloadAttachments(newAttachments);
+					await Utils.downloadAttachments(updatedAttachments);
 
 					if (Settings.exportPreset != ExportPreset.RawDocuments)
 					{
-						await Utils.downloadAttachments([website.index.websiteDataAttachment()]);
-						await Utils.downloadAttachments([website.index.indexDataAttachment()]);
+						await website.index.saveWebsiteData();
+						if (!Settings.exportOptions.searchOptions.serverSide)
+						{
+							await website.index.saveIndexData();
+						}
 					}
 				}
+			}
+			else
+			{
+				ExportLog.setRemainingWorkItems(0);
 			}
 		}
 		catch (e)
@@ -110,6 +120,7 @@ export class HTMLExporter
 			ExportLog.error(e, "Export Failed", true);
 		}
 
+		ExportLog.endDocumentProgress();
 		MarkdownRendererAPI.endBatch();
 
 		return website;

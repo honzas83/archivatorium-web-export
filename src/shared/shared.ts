@@ -8,5 +8,7 @@ export class Shared
 	public static fontFolderName: string = "fonts";
 	public static htmlFolderName: string = "html";
 	public static metadataFileName: string = "metadata.json";
+	public static metadataPagesFileName: string = "metadata-pages.json";
+	public static metadataFilesFileName: string = "metadata-files.json";
 	public static searchIndexFileName: string = "search-index.json";
 }

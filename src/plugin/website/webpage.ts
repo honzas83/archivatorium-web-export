@@ -52,11 +52,34 @@ export class Webpage extends Attachment
 	}
 
 	public website: Website;
-	public pageDocument: Document = document.implementation.createHTMLDocument();
-	public attachments: Attachment[] = [];
+	public pageDocument!: Document;
+	private _attachments: Attachment[] | undefined;
+	private _outputData: WebpageOutputData | undefined;
 	public type: DocumentType = DocumentType.Markdown;
 	public title: string = "";
 	public icon: string = "";
+
+	public get attachments(): Attachment[]
+	{
+		this._attachments ??= [];
+		return this._attachments;
+	}
+
+	public get outputData(): WebpageOutputData
+	{
+		this._outputData ??= new WebpageOutputData();
+		return this._outputData;
+	}
+
+	public set outputData(value: WebpageOutputData)
+	{
+		this._outputData = value;
+	}
+
+	public get generatedOutputData(): WebpageOutputData | undefined
+	{
+		return this._outputData;
+	}
 
 	/**
 	 * @param file The original markdown file to export
@@ -81,8 +104,6 @@ export class Webpage extends Attachment
 		if (this.exportOptions.flattenExportPaths) 
 			this.targetPath.parent = Path.emptyPath;
 	}
-
-	public outputData: WebpageOutputData = new WebpageOutputData();
 
 	public async generateOutput()
 	{
@@ -413,7 +434,6 @@ export class Webpage extends Attachment
 	{
 		// if it has a date in the frontmatter, use that
 		const date = this.frontmatter[Settings.rssDateProperty];
-		console.log(date);
 		if (date) return date;
 
 		// if it doesn't, use the file's modified date
@@ -475,7 +495,7 @@ export class Webpage extends Attachment
 	private get metadataRedirectValues(): string[]
 	{
 		const values: string[] = [];
-		this.collectMetadataValues(this.frontmatter, values);
+		this.collectMetadataValues(this.frontmatter?.citekey, values);
 		return Array.from(new Set(values));
 	}
 
@@ -638,6 +658,8 @@ export class Webpage extends Attachment
 
 	public async renderDocument(): Promise<Webpage | undefined>
 	{
+		this.headerMap = new Map();
+		this.pageDocument = document.implementation.createHTMLDocument();
 		this.pageDocument.documentElement.innerHTML = this.website.webpageTemplate.getDocElementInner();
 
 		// render the file
@@ -751,7 +773,7 @@ export class Webpage extends Attachment
 		return attachment.targetPath.path + hash;
 	}
 
-	readonly headerMap = new Map();
+	private headerMap!: Map<string, string>;
 	private remapLinks()
 	{
 		// convert the data-heading to the id
@@ -850,5 +872,25 @@ export class Webpage extends Attachment
 		this.viewElement?.remove();
 		// @ts-ignore
 		this.pageDocument = undefined;
+
+		if (!this.exportOptions.combineAsSingleFile)
+		{
+			this.data = "";
+			if (this._outputData)
+			{
+				this._outputData.html = "";
+				this._outputData.searchContent = "";
+				this._outputData.metadataSearchText = "";
+				this._outputData.srcLinks = [];
+				this._outputData.hrefLinks = [];
+				this._outputData.linksToOtherFiles = [];
+				this._outputData.headings = [];
+				this._outputData.renderedHeadings = [];
+				this._outputData.backlinks = [];
+			}
+			this._attachments = undefined;
+			// @ts-ignore
+			this.headerMap = undefined;
+		}
 	}
 }

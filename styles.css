@@ -11,6 +11,15 @@ body.html-export-running :is(.nav-files-container, .side-dock-actions, .workspac
 	pointer-events: none !important;
 }
 
+body.html-export-running .html-export-render-leaf
+{
+	display: block !important;
+	position: absolute !important;
+	inset: 0;
+	visibility: hidden !important;
+	pointer-events: none !important;
+}
+
 /* Flow list used on the settings page */
 .flow-list {
     contain: inline-size;
@@ -163,6 +172,13 @@ button.html-progress-cancel
 .html-progress-sub
 {
 	margin-block-start: 2em;
+}
+
+.html-progress-metrics
+{
+	margin-block-start: 0.75em;
+	color: var(--text-muted);
+	font-variant-numeric: tabular-nums;
 }
 
 .html-progress-log

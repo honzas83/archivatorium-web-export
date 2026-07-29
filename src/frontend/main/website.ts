@@ -434,7 +434,21 @@ export class ObsidianWebsite {
 				);
 				if (dataReq.ok) {
 					const jsonStr = await dataReq.text();
-					return WebsiteData.fromJSON(jsonStr);
+					const data = WebsiteData.fromJSON(jsonStr);
+					if (data.metadataShards)
+					{
+						const [webpagesReq, fileInfoReq] = await Promise.all([
+							fetch(`${Shared.libFolderName}/${data.metadataShards.webpages}`),
+							fetch(`${Shared.libFolderName}/${data.metadataShards.fileInfo}`),
+						]);
+						if (!webpagesReq.ok || !fileInfoReq.ok)
+						{
+							throw new Error("Failed to load website metadata shards.");
+						}
+						data.webpages = await webpagesReq.json();
+						data.fileInfo = await fileInfoReq.json();
+					}
+					return data;
 				}
 			} catch (e) {
 				console.error("Failed to load website metadata.", e);
