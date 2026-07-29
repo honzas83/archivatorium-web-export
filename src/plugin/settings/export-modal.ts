@@ -111,37 +111,6 @@ export class ExportModal extends Modal
 
 		this.titleEl.setText(ExportModal.title);
 
-		if (HTMLExportPlugin.updateInfo.updateAvailable) 
-		{
-			// create red notice showing the update is available
-			const updateNotice = contentEl.createEl('strong', { text: `${i18n.updateAvailable}: ${HTMLExportPlugin.updateInfo.currentVersion} ⟶ ${HTMLExportPlugin.updateInfo.latestVersion}` });
-			updateNotice.setAttribute("style",
-				`margin-block-start: calc(var(--h3-size)/2);
-			background-color: var(--interactive-normal);
-			padding: 4px;
-			padding-left: 1em;
-			padding-right: 1em;
-			color: var(--color-red);
-			border-radius: 5px;
-			display: block;
-			width: fit-content;`)
-
-			// create normal block with update notes
-			const updateNotes = contentEl.createEl('div', { text: HTMLExportPlugin.updateInfo.updateNote });
-			updateNotes.setAttribute("style",
-				`margin-block-start: calc(var(--h3-size)/2);
-			background-color: var(--background-secondary-alt);
-			padding: 4px;
-			padding-left: 1em;
-			padding-right: 1em;
-			color: var(--text-normal);
-			font-size: var(--font-ui-smaller);
-			border-radius: 5px;
-			display: block;
-			width: fit-content;
-			white-space: pre-wrap;`)
-		}
-
 		const modeDescriptions = 
 		{
 			"online": lang.exportMode.online,

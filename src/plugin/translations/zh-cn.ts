@@ -16,7 +16,6 @@ export const language: i18n =
 		noFolders: "路径不能是文件夹",
 		mustHaveExtension: "路径必须包含扩展名: {0}",
 	},
-	updateAvailable: "有更新可用",
 	exportAsHTML: "导出为HTML",
 	exportModal:
 	{

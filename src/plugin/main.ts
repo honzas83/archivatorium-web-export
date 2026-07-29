@@ -1,5 +1,5 @@
 // imports from obsidian API
-import { Notice, Plugin, TFile, TFolder, requestUrl,moment, MarkdownPreviewRenderer, MarkdownPreviewView, MarkdownRenderer, Component} from 'obsidian';
+import { Notice, Plugin, TFile, TFolder } from 'obsidian';
 
 // modules that are part of the plugin
 import { AssetHandler } from 'src/plugin/asset-loaders/asset-handler';
@@ -15,17 +15,6 @@ import { i18n } from './translations/language';
 
 
 export default class HTMLExportPlugin extends Plugin {
-	static updateInfo: {
-		updateAvailable: boolean;
-		latestVersion: string;
-		currentVersion: string;
-		updateNote: string;
-	} = {
-		updateAvailable: false,
-		latestVersion: "0",
-		currentVersion: "0",
-		updateNote: "",
-	};
 	static pluginVersion: string = "0.0.0";
 	public api = MarkdownRendererAPI;
 	public internalAPI = _MarkdownRendererInternal;
@@ -45,7 +34,6 @@ export default class HTMLExportPlugin extends Plugin {
 
 	async onload() {
 		console.log("Loading archivatorium-web-export plugin");
-		this.checkForUpdates();
 		HTMLExportPlugin.pluginVersion = this.manifest.version;
 
 		// @ts-ignore
@@ -137,57 +125,6 @@ export default class HTMLExportPlugin extends Plugin {
 				});
 			})
 		);
-	}
-
-	async checkForUpdates(): Promise<{
-		updateAvailable: boolean;
-		latestVersion: string;
-		currentVersion: string;
-		updateNote: string;
-	}> {
-		const currentVersion = this.manifest.version;
-
-		try {
-			let url =
-				"https://raw.githubusercontent.com/honzas83/archivatorium-web-export/master/manifest.json?cache=" +
-				Date.now() +
-				"";
-			if (this.manifest.version.endsWith("b"))
-				url =
-					"https://raw.githubusercontent.com/honzas83/archivatorium-web-export/master/manifest-beta.json?cache=" +
-					Date.now() +
-					"";
-			const manifestResp = await requestUrl(url);
-			if (manifestResp.status != 200)
-				throw new Error("Could not fetch manifest");
-			const manifest = manifestResp.json;
-			const latestVersion = manifest.version ?? currentVersion;
-			const updateAvailable = currentVersion < latestVersion;
-			const updateNote = manifest.updateNote ?? "";
-
-			HTMLExportPlugin.updateInfo = {
-				updateAvailable: updateAvailable,
-				latestVersion: latestVersion,
-				currentVersion: currentVersion,
-				updateNote: updateNote,
-			};
-
-			if (updateAvailable)
-				ExportLog.log(
-					`${i18n.updateAvailable}: ${currentVersion} ⟶ ${latestVersion}`
-				);
-
-			return HTMLExportPlugin.updateInfo;
-		} catch {
-			ExportLog.log("Could not check for update");
-			HTMLExportPlugin.updateInfo = {
-				updateAvailable: false,
-				latestVersion: currentVersion,
-				currentVersion: currentVersion,
-				updateNote: "",
-			};
-			return HTMLExportPlugin.updateInfo;
-		}
 	}
 
 	onunload() {

@@ -181,9 +181,6 @@ to an untrusted network.
 
 - Exporting reads selected files and metadata from the local vault and writes
   the generated website to the destination chosen by the user.
-- On startup, the plugin downloads `manifest.json`, or `manifest-beta.json` for
-  beta builds, from this GitHub repository. It only compares version numbers
-  and displays an update notice; the request contains no vault data.
 - Remote emoji or other explicitly referenced assets may be downloaded when
   required by exported content and the selected export options.
 - Static exports do not send vault contents to Archivatorium, the project

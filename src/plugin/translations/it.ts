@@ -15,7 +15,6 @@ export const language: i18n =
 		noFolders: "Il percorso non può essere una directory",
 		mustHaveExtension: "Il percorso deve avere estensione: {0}"
 	},
-	updateAvailable: "Aggiornamento disponibile",
 	exportAsHTML: "Esporta come HTML",
 	exportModal: {
 		title: "Esporta in HTML",

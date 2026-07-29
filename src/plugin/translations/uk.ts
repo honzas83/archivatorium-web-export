@@ -16,7 +16,6 @@ export const language: i18n =
 		noFolders: "Шлях не може бути каталогом",
 		mustHaveExtension: "Шлях повинен мати розширення: {0}",
 	},
-	updateAvailable: "Доступне оновлення",
 	exportAsHTML: "Експортувати як HTML",
 	exportModal:
 	{

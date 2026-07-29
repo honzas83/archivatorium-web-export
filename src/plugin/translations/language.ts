@@ -21,7 +21,6 @@ export interface i18n
 		noFolders: string;
 		mustHaveExtension: string;
 	},
-	updateAvailable: string;
 	exportAsHTML: string;
 	exportModal: 
 	{
