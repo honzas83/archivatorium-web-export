@@ -1,6 +1,6 @@
 {
 	"name": "archivatorium-web-export",
-	"version": "1.9.2",
+	"version": "2.0.0",
 	"description": "Web publishing and collection checkout for Archivatorium research vaults.",
 	"main": "main.js",
 	"engines": {

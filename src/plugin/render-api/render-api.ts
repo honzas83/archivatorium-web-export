@@ -114,10 +114,15 @@ export namespace _MarkdownRendererInternal {
 	let logContainer: HTMLElement | undefined;
 	let loadingContainer: HTMLElement | undefined;
 	let fileListContainer: HTMLElement | undefined;
-	let documentProgressStartedAt: number = 0;
 	let documentProgressActive: boolean = false;
 	let completedWorkItems: number = 0;
 	let totalWorkItems: number = 0;
+	let completedOperationItems: number = 0;
+	let totalOperationItems: number = 0;
+	const recentOperationSamples: {
+		timestamp: number;
+		completedWork: number;
+	}[] = [];
 	let completedPhaseItems: number = 0;
 	let totalPhaseItems: number = 0;
 	let lastWorkProgressPaintAt: number = 0;
@@ -181,7 +186,50 @@ export namespace _MarkdownRendererInternal {
 		);
 	}
 
+	function countEmptySemanticSections(container: HTMLElement): number {
+		const semanticSectionSelector = [
+			".el-h1",
+			".el-h2",
+			".el-h3",
+			".el-h4",
+			".el-h5",
+			".el-h6",
+			".el-p",
+			".el-ul",
+			".el-ol",
+			".el-blockquote",
+			".el-pre",
+			".el-table",
+		].join(",");
+
+		const sections = Array.from(
+			container.querySelectorAll(semanticSectionSelector)
+		);
+		if (container.matches(semanticSectionSelector)) sections.unshift(container);
+
+		return sections
+			.filter((section) =>
+				section.childElementCount === 0 &&
+				(section.textContent?.trim().length ?? 0) === 0
+			).length;
+	}
+
 	async function prepareRenderer(renderer: any, file: TFile | undefined): Promise<void> {
+		const existingSections = Array.isArray(renderer.sections)
+			? renderer.sections
+			: [];
+		if (existingSections.length > 5_000) {
+			for (const section of existingSections) {
+				section.headingCollapsed = false;
+				section.shown = true;
+			}
+			ExportLog.log(
+				`Using non-recursive preparation for ${existingSections.length} pre-parsed sections.`,
+				"Preparing large document"
+			);
+			return;
+		}
+
 		const operations = [
 			{ name: "unfold headings", run: () => renderer.unfoldAllHeadings() },
 			{ name: "unfold lists", run: () => renderer.unfoldAllLists() },
@@ -320,133 +368,166 @@ export namespace _MarkdownRendererInternal {
 
 		if (!newMarkdownEl || !newSizerEl) return failRender(preview.file, "Please specify a container element, or enable keepViewContainer!");
 
+		const originalContainerEl = preview.containerEl;
 		preview.containerEl = newSizerEl;
 
-		// @ts-ignore
-		const promises: Promise<any>[] = [];
-		const foldedCallouts: HTMLElement[] = [];
-		for (const section of sections) {
-			section.shown = true;
-			section.rendered = false;
+		try {
 			// @ts-ignore
-			section.resetCompute();
-			// @ts-ignore
-			section.setCollapsed(false);
-			section.el.empty();
+			const promises: Promise<any>[] = [];
+			const sectionSnapshots: HTMLElement[] = [];
+			for (const section of sections) {
+				section.shown = true;
+				// @ts-ignore
+				section.setCollapsed(false);
 
-			newSizerEl.appendChild(section.el);
+				let success = false;
+				for (let attempt = 0; attempt < 2 && !success; attempt++) {
+					section.rendered = false;
+					// @ts-ignore
+					section.resetCompute();
+					section.el.empty();
+					newSizerEl.appendChild(section.el);
 
-			// @ts-ignore
-			await section.render();
-
-			// @ts-ignore
-			let success = await waitUntil(() => (section.el && section.rendered) || checkCancelled(), 2000, 1);
-			if (!success) return failRender(preview.file, "Failed to render section!");
-
-			await renderer.measureSection(section);
-			success = await waitUntil(() => section.computed || checkCancelled(), 2000, 1);
-			if (!success) return failRender(preview.file, "Failed to compute section!");
-
-			// compile dataview
-			if (DataviewRenderer.isDataviewEnabled())
-			{
-				const dataviewInfo = DataviewRenderer.getDataViewsFromHTML(section.el)[0];
-				if (dataviewInfo) {
-					const dataviewContainer = document.body.createDiv();
-					dataviewContainer.classList.add(`block-language-${dataviewInfo.keyword}`);
-					dataviewInfo.preEl.replaceWith(dataviewContainer);
-					await new DataviewRenderer(preview, preview.file, dataviewInfo?.query, dataviewInfo.keyword).generate(dataviewContainer);
-				}
-			}
-
-			// @ts-ignore
-			await preview.postProcess(section, promises, renderer.frontmatter);
-
-			// unfold callouts
-			const folded = Array.from(section.el.querySelectorAll(".callout-content[style*='display: none']")) as HTMLElement[];
-			for (const callout of folded) {
-				callout.style.display = "";
-			}
-			foldedCallouts.push(...folded);
-
-			// wait for transclusions
-			await waitUntil(() => !section.el.querySelector(".markdown-preview-pusher") || section.el.querySelector(".markdown-preview-pusher + *") != null || checkCancelled(), 500, 1);
-			if (checkCancelled()) return undefined;
-
-			if ((section.el.querySelector(".markdown-preview-pusher") && !section.el.querySelector(".markdown-preview-pusher + *"))) {
-				ExportLog.warning("Transclusions were not rendered correctly in file " + preview.file.name + "!");
-			}
-
-			// wait for generic plugins
-			await waitUntil(() => !section.el.querySelector("[class^='block-language-']:empty") || checkCancelled(), 500, 1);
-			if (checkCancelled()) return undefined;
-
-			// convert canvas elements into images here because otherwise they will lose their data when moved
-			const canvases = Array.from(section.el.querySelectorAll("canvas:not(.pdf-embed canvas)")) as HTMLCanvasElement[];
-			for (const canvas of canvases) {
-				const data = canvas.toDataURL();
-				if (data.length < 100) {
-					ExportLog.log(canvas.outerHTML, "Failed to render canvas based plugin element in file " + preview.file.name + ":");
-					canvas.remove();
-					continue;
+					// @ts-ignore
+					await section.render();
+					success = await waitUntil(
+						() =>
+							(section.rendered &&
+								countEmptySemanticSections(section.el) === 0) ||
+							checkCancelled(),
+						2_000,
+						16
+					);
 				}
 
-				const image = document.body.createEl("img");
-				image.src = data;
-				image.style.width = canvas.style.width || "100%";
-				image.style.maxWidth = "100%";
-				canvas.replaceWith(image);
-			};
+				if (checkCancelled()) return undefined;
+				if (!success) {
+					newMarkdownEl.remove();
+					return failRender(
+						preview.file,
+						`Failed to produce content for section starting at line ${section.lineStart + 1}.`
+					);
+				}
 
-			//console.debug(section.el.outerHTML); // for some reason adding this line here fixes an issue where some plugins wouldn't render
+				// compile dataview
+				if (DataviewRenderer.isDataviewEnabled())
+				{
+					const dataviewInfo = DataviewRenderer.getDataViewsFromHTML(section.el)[0];
+					if (dataviewInfo) {
+						const dataviewContainer = document.body.createDiv();
+						dataviewContainer.classList.add(`block-language-${dataviewInfo.keyword}`);
+						dataviewInfo.preEl.replaceWith(dataviewContainer);
+						await new DataviewRenderer(preview, preview.file, dataviewInfo?.query, dataviewInfo.keyword).generate(dataviewContainer);
+					}
+				}
 
-			const invalidPluginBlocks = Array.from(section.el.querySelectorAll("[class^='block-language-']:empty"));
-			for (const block of invalidPluginBlocks) {
-				ExportLog.warning(`Plugin element ${block.className || block.parentElement?.className || "unknown"} from ${preview.file.name} not rendered correctly!`);
+				const pendingPromiseStart = promises.length;
+				// @ts-ignore
+				await preview.postProcess(section, promises, renderer.frontmatter);
+				await Promise.all(promises.slice(pendingPromiseStart));
+
+				// unfold callouts while embedded and plugin content is settling
+				const folded = Array.from(section.el.querySelectorAll(".callout-content[style*='display: none']")) as HTMLElement[];
+				for (const callout of folded) {
+					callout.style.display = "";
+				}
+
+				// wait for transclusions
+				await waitUntil(() => !section.el.querySelector(".markdown-preview-pusher") || section.el.querySelector(".markdown-preview-pusher + *") != null || checkCancelled(), 500, 16);
+				if (checkCancelled()) return undefined;
+
+				if ((section.el.querySelector(".markdown-preview-pusher") && !section.el.querySelector(".markdown-preview-pusher + *"))) {
+					ExportLog.warning("Transclusions were not rendered correctly in file " + preview.file.name + "!");
+				}
+
+				// wait for generic plugins
+				await waitUntil(() => !section.el.querySelector("[class^='block-language-']:empty") || checkCancelled(), 500, 16);
+				if (checkCancelled()) return undefined;
+
+				// convert canvas elements into images here because otherwise they will lose their data when moved
+				const canvases = Array.from(section.el.querySelectorAll("canvas:not(.pdf-embed canvas)")) as HTMLCanvasElement[];
+				for (const canvas of canvases) {
+					const data = canvas.toDataURL();
+					if (data.length < 100) {
+						ExportLog.log(canvas.outerHTML, "Failed to render canvas based plugin element in file " + preview.file.name + ":");
+						canvas.remove();
+						continue;
+					}
+
+					const image = document.body.createEl("img");
+					image.src = data;
+					image.style.width = canvas.style.width || "100%";
+					image.style.maxWidth = "100%";
+					canvas.replaceWith(image);
+				};
+
+				const invalidPluginBlocks = Array.from(section.el.querySelectorAll("[class^='block-language-']:empty"));
+				for (const block of invalidPluginBlocks) {
+					ExportLog.warning(`Plugin element ${block.className || block.parentElement?.className || "unknown"} from ${preview.file.name} not rendered correctly!`);
+				}
+
+				for (const callout of folded) {
+					callout.style.display = "none";
+				}
+
+				const snapshot = section.el.cloneNode(true) as HTMLElement;
+				if (countEmptySemanticSections(snapshot) > 0) {
+					newMarkdownEl.remove();
+					return failRender(
+						preview.file,
+						`Section starting at line ${section.lineStart + 1} became empty during post-processing.`
+					);
+				}
+				sectionSnapshots.push(snapshot);
 			}
+
+			// @ts-ignore
+			await Promise.all(promises);
+
+			if (sectionSnapshots.length !== sections.length) {
+				newMarkdownEl.remove();
+				return failRender(
+					preview.file,
+					`Rendered ${sectionSnapshots.length} of ${sections.length} document sections.`
+				);
+			}
+
+			newSizerEl.empty();
+
+			// create the markdown-preview-pusher element
+			if (options.createPusherElement) {
+				newSizerEl.createDiv({ attr: { class: "markdown-pusher", style: "width: 1px; height: 0.1px; margin-bottom: 0px;" } });
+			}
+
+			for (const snapshot of sectionSnapshots) {
+				newSizerEl.appendChild(snapshot);
+			}
+
+			// get banner plugin banner and insert it before the sizer element
+			const banner = originalContainerEl.querySelector(".obsidian-banner-wrapper");
+			if (banner) {
+				newSizerEl.before(banner.cloneNode(true));
+			}
+
+			// if we aren't keeping the view element then only keep the content of the sizer element
+			if (options.createDocumentContainer === false) {
+				newMarkdownEl.outerHTML = newSizerEl.innerHTML;
+			}
+
+			options.container?.appendChild(newMarkdownEl);
+
+			if (options.unifyTitleFormat) {
+				var title = await _MarkdownRendererInternal.getTitleForFile(preview.file);
+				var icon = await _MarkdownRendererInternal.getIconForFile(preview.file);
+				let iconSVG = await MarkdownRendererAPI.renderMarkdownSimple(icon.icon) ?? icon.icon;
+				_MarkdownRendererInternal.addTitle(options.container ?? newMarkdownEl, title.title, title.isDefault, iconSVG, icon.isDefault, preview.file, options);
+			}
+
+			return newMarkdownEl;
 		}
-
-		// @ts-ignore
-		await Promise.all(promises);
-
-		// refold callouts
-		for (const callout of foldedCallouts) {
-			callout.style.display = "none";
+		finally {
+			preview.containerEl = originalContainerEl;
 		}
-
-		newSizerEl.empty();
-
-		// create the markdown-preview-pusher element
-		if (options.createPusherElement) {
-			newSizerEl.createDiv({ attr: { class: "markdown-pusher", style: "width: 1px; height: 0.1px; margin-bottom: 0px;" } });
-		}
-
-		// move all of them back in since rendering can cause some sections to move themselves out of their container
-		for (const section of sections) {
-			newSizerEl.appendChild(section.el.cloneNode(true));
-		}
-
-		// get banner plugin banner and insert it before the sizer element
-		const banner = preview.containerEl.querySelector(".obsidian-banner-wrapper");
-		if (banner) {
-			newSizerEl.before(banner);
-		}
-
-		// if we aren't keeping the view element then only keep the content of the sizer element
-		if (options.createDocumentContainer === false) {
-			newMarkdownEl.outerHTML = newSizerEl.innerHTML;
-		}
-
-		options.container?.appendChild(newMarkdownEl);
-
-		if (options.unifyTitleFormat) {
-			var title = await _MarkdownRendererInternal.getTitleForFile(preview.file);
-			var icon = await _MarkdownRendererInternal.getIconForFile(preview.file);
-			let iconSVG = await MarkdownRendererAPI.renderMarkdownSimple(icon.icon) ?? icon.icon;
-			_MarkdownRendererInternal.addTitle(options.container ?? newMarkdownEl, title.title, title.isDefault, iconSVG, icon.isDefault, preview.file, options);
-		}
-
-		return newMarkdownEl;
 	}
 
 	export async function renderMarkdownView(preview: MarkdownPreviewView, options: MarkdownRendererOptions): Promise<HTMLElement | undefined> {
@@ -509,6 +590,9 @@ export namespace _MarkdownRendererInternal {
 			previewEl.querySelector(".markdown-preview-sizer") as HTMLElement ?? previewEl;
 		previewEl.style.minHeight = getSizerEl().style.minHeight;
 
+		const cachedSectionCount = sections.filter(
+			(section) => (section.html?.trim().length ?? 0) > 0
+		).length;
 		let rendered = false;
 		// @ts-ignore
 		preview.renderer.onRendered(() => {
@@ -520,11 +604,10 @@ export namespace _MarkdownRendererInternal {
 		preview.rerender(true);
 
 		// wait for rendering to finish using callback
-		let renderSuccess = await waitUntil(
+		const renderSuccess = await waitUntil(
 			() =>
 				rendered ||
 				sections.every((section) => section.rendered) ||
-				getSizerEl().children.length >= sections.length ||
 				checkCancelled(),
 			5_000,
 			16
@@ -532,9 +615,18 @@ export namespace _MarkdownRendererInternal {
 		if (checkCancelled()) return undefined;
 		if (!renderSuccess)
 		{
-			newMarkdownEl.remove();
-			reportFallbackRenderer(preview.file, "Preview renderer did not signal completion.");
-			return renderMarkdownViewFallback(preview, options);
+			if (sections.length === 0 || cachedSectionCount === 0) {
+				newMarkdownEl.remove();
+				reportFallbackRenderer(
+					preview.file,
+					"Preview renderer did not signal completion and exposed no cached sections."
+				);
+				return renderMarkdownViewFallback(preview, options);
+			}
+			ExportLog.log(
+				`Preview callback timed out with ${cachedSectionCount} of ${sections.length} sections cached; continuing with cached repair.`,
+				"Repairing preview"
+			);
 		}
 
 		// @ts-ignore
@@ -567,9 +659,10 @@ export namespace _MarkdownRendererInternal {
 		if (checkCancelled()) return undefined;
 
 		if (!sectionsSuccess) {
-			newMarkdownEl.remove();
-			reportFallbackRenderer(preview.file, "Preview renderer did not attach all document sections.");
-			return renderMarkdownViewFallback(preview, options);
+			ExportLog.log(
+				`Preview attached ${getSizerEl().children.length} of ${sections.length} sections; missing sections will be restored from cache.`,
+				"Repairing preview"
+			);
 		}
 
 		// compile dataview
@@ -673,6 +766,105 @@ export namespace _MarkdownRendererInternal {
 			callout.style.display = "none";
 		}
 
+		const liveSizerEl = getSizerEl();
+		const finalEmptySemanticSections =
+			countEmptySemanticSections(liveSizerEl);
+		let sectionSnapshots: HTMLElement[] | undefined;
+		if (
+			liveSizerEl.children.length < sections.length ||
+			finalEmptySemanticSections > 0
+		) {
+			ExportLog.log(
+				`Restoring ${finalEmptySemanticSections} virtualized sections from the renderer cache.`,
+				"Repairing preview"
+			);
+
+			const snapshots = sections.map((section) =>
+				countEmptySemanticSections(section.el) === 0
+					? section.el.cloneNode(true) as HTMLElement
+					: undefined
+			);
+			const missingIndexes = snapshots
+				.map((snapshot, index) => snapshot ? -1 : index)
+				.filter((index) => index >= 0);
+			const repairBatchSize = 100;
+			let repairFailed = false;
+
+			for (
+				let batchStart = 0;
+				batchStart < missingIndexes.length && !repairFailed;
+				batchStart += repairBatchSize
+			) {
+				const batchIndexes = missingIndexes.slice(
+					batchStart,
+					batchStart + repairBatchSize
+				);
+				await Promise.all(batchIndexes.map(async (index) => {
+					const section = sections[index];
+					const cachedHTML = section.html?.trim() ?? "";
+					if (!cachedHTML) {
+						repairFailed = true;
+						return;
+					}
+
+					const repairEl = section.el.cloneNode(false) as HTMLElement;
+					repairEl.innerHTML = cachedHTML;
+					const repairSection = { ...section, el: repairEl };
+					const postProcessPromises: Promise<any>[] = [];
+
+					// @ts-ignore Obsidian accepts the same section shape it exposes
+					// through renderer.sections.
+					await preview.postProcess(
+						repairSection,
+						postProcessPromises,
+						renderer.frontmatter
+					);
+					await Promise.all(postProcessPromises);
+
+					if (countEmptySemanticSections(repairEl) > 0) {
+						repairFailed = true;
+						return;
+					}
+					snapshots[index] = repairEl;
+				}));
+			}
+
+			if (
+				repairFailed ||
+				snapshots.some((snapshot) => !snapshot)
+			) {
+				newMarkdownEl.remove();
+				reportFallbackRenderer(
+					preview.file,
+					"Cached preview repair could not restore every document section."
+				);
+				return renderMarkdownViewFallback(preview, options);
+			}
+			sectionSnapshots = snapshots as HTMLElement[];
+		}
+		else {
+			// Clone the verified DOM before yielding again so viewport
+			// virtualization cannot clear sections during export assembly.
+			const sizerSnapshot = liveSizerEl.cloneNode(true) as HTMLElement;
+			sectionSnapshots = Array.from(sizerSnapshot.children)
+				.map((child) => child as HTMLElement);
+		}
+
+		const repairedContainer = batchDocument.body.createDiv();
+		for (const snapshot of sectionSnapshots) {
+			repairedContainer.appendChild(snapshot.cloneNode(true));
+		}
+		const remainingEmptySections =
+			countEmptySemanticSections(repairedContainer);
+		repairedContainer.remove();
+		if (remainingEmptySections > 0) {
+			newMarkdownEl.remove();
+			return failRender(
+				preview.file,
+				`Rendered document still contains ${remainingEmptySections} empty semantic sections after repair.`
+			);
+		}
+
 		newSizerEl.empty();
 
 		// create the markdown-preview-pusher element
@@ -685,14 +877,16 @@ export namespace _MarkdownRendererInternal {
 			});
 		}
 
-		newSizerEl.innerHTML = getSizerEl().innerHTML;
+		for (const snapshot of sectionSnapshots) {
+			newSizerEl.appendChild(snapshot);
+		}
 
 		// get banner plugin banner and insert it before the sizer element
 		const banner = preview.containerEl.querySelector(
 			".obsidian-banner-wrapper"
 		);
 		if (banner) {
-			newSizerEl.before(banner);
+			newSizerEl.before(banner.cloneNode(true));
 		}
 		// if we aren't keeping the view element then only keep the content of the sizer element
 		if (options.createDocumentContainer === false) {
@@ -1440,16 +1634,28 @@ export namespace _MarkdownRendererInternal {
 		if (!documentProgressActive) electronWindow?.setProgressBar(fraction);
 	}
 
-	export function _startDocumentProgress(total: number, phaseTotal: number): void {
-		documentProgressStartedAt = performance.now();
+	export function _startDocumentProgress(
+		total: number,
+		phaseTotal: number,
+		operationTotal: number = total
+	): void {
 		documentProgressActive = true;
 		completedWorkItems = 0;
 		totalWorkItems = Math.max(0, total);
+		completedOperationItems = 0;
+		totalOperationItems = Math.max(0, operationTotal);
+		recentOperationSamples.length = 0;
+		_startWorkPhase(phaseTotal);
+		const metricsElement = loadingContainer?.querySelector(".html-progress-metrics") as HTMLElement | null;
+		if (metricsElement) metricsElement.textContent = "";
+		_reportDocumentProgress(completedWorkItems, totalWorkItems);
+	}
+
+	export function _startWorkPhase(phaseTotal: number): void {
+		if (!documentProgressActive) return;
 		completedPhaseItems = 0;
 		totalPhaseItems = Math.max(0, phaseTotal);
 		lastWorkProgressPaintAt = 0;
-		const metricsElement = loadingContainer?.querySelector(".html-progress-metrics") as HTMLElement | null;
-		if (metricsElement) metricsElement.textContent = "";
 		_reportDocumentProgress(completedWorkItems, totalWorkItems);
 	}
 
@@ -1457,13 +1663,19 @@ export namespace _MarkdownRendererInternal {
 		documentProgressActive = false;
 	}
 
-	export function _setRemainingWorkItems(remaining: number): void {
+	export function _setRemainingWorkItems(
+		remaining: number,
+		phaseTotal: number = remaining
+	): void {
 		if (!documentProgressActive) return;
 		totalWorkItems = completedWorkItems + Math.max(0, remaining);
-		documentProgressStartedAt = performance.now();
-		completedPhaseItems = 0;
-		totalPhaseItems = Math.max(0, remaining);
-		lastWorkProgressPaintAt = 0;
+		_startWorkPhase(phaseTotal);
+	}
+
+	export function _setRemainingOperationItems(remaining: number): void {
+		if (!documentProgressActive) return;
+		totalOperationItems =
+			completedOperationItems + Math.max(0, remaining);
 		_reportDocumentProgress(completedWorkItems, totalWorkItems);
 	}
 
@@ -1471,12 +1683,28 @@ export namespace _MarkdownRendererInternal {
 		count: number = 1,
 		message: string = "",
 		subMessage: string = "",
-		progressColor: string = "var(--interactive-accent)"
+		progressColor: string = "var(--interactive-accent)",
+		operationCount: number = 1
 	): void {
 		if (!documentProgressActive) return;
 		completedWorkItems = Math.min(totalWorkItems, completedWorkItems + Math.max(0, count));
+		completedOperationItems = Math.min(
+			totalOperationItems,
+			completedOperationItems + Math.max(0, operationCount)
+		);
 		completedPhaseItems = Math.min(totalPhaseItems, completedPhaseItems + Math.max(0, count));
 		const now = performance.now();
+		for (let index = 0; index < Math.floor(operationCount); index++)
+		{
+			recentOperationSamples.push({
+				timestamp: now,
+				completedWork: completedWorkItems,
+			});
+		}
+		while (recentOperationSamples.length > 101)
+		{
+			recentOperationSamples.shift();
+		}
 		const shouldPaint =
 			now - lastWorkProgressPaintAt >= 200 ||
 			completedWorkItems >= totalWorkItems;
@@ -1498,12 +1726,26 @@ export namespace _MarkdownRendererInternal {
 		if (!loadingContainer || total <= 0) return;
 
 		const fraction = Math.min(1, Math.max(0, completed / total));
-		const elapsedSeconds = Math.max(0, (performance.now() - documentProgressStartedAt) / 1000);
-		const documentsPerSecond = completedPhaseItems > 0 && elapsedSeconds > 0
-			? completedPhaseItems / elapsedSeconds
+		const operationWindowSeconds = recentOperationSamples.length > 1
+			? (
+				recentOperationSamples[recentOperationSamples.length - 1].timestamp -
+				recentOperationSamples[0].timestamp
+			) / 1000
 			: 0;
-		const remainingSeconds = documentsPerSecond > 0
-			? (totalPhaseItems - completedPhaseItems) / documentsPerSecond
+		const operationsPerSecond = operationWindowSeconds > 0
+			? (recentOperationSamples.length - 1) / operationWindowSeconds
+			: 0;
+		const recentCompletedWork = recentOperationSamples.length > 1
+			? (
+				recentOperationSamples[recentOperationSamples.length - 1].completedWork -
+				recentOperationSamples[0].completedWork
+			)
+			: 0;
+		const workItemsPerSecond = operationWindowSeconds > 0
+			? recentCompletedWork / operationWindowSeconds
+			: 0;
+		const remainingSeconds = workItemsPerSecond > 0
+			? (total - completed) / workItemsPerSecond
 			: 0;
 		const formatDuration = (seconds: number): string => {
 			const rounded = Math.max(0, Math.round(seconds));
@@ -1522,12 +1764,12 @@ export namespace _MarkdownRendererInternal {
 		if (metricsElement)
 		{
 			const percentage = (fraction * 100).toFixed(1);
-			const rate = documentsPerSecond.toFixed(2);
+			const rate = operationsPerSecond.toFixed(2);
 			const eta = completed >= total
 				? "0s"
-				: documentsPerSecond > 0 ? formatDuration(remainingSeconds) : "calculating";
+				: workItemsPerSecond > 0 ? formatDuration(remainingSeconds) : "calculating";
 			const metricsText =
-				`${percentage}% · ${completed}/${total} files · ${rate} files/s · ETA ${eta}`;
+				`${percentage}% · ${completedOperationItems}/${totalOperationItems} items · ${rate} items/s · ETA ${eta}`;
 			if (metricsElement.textContent !== metricsText) metricsElement.textContent = metricsText;
 		}
 
@@ -1695,26 +1937,52 @@ export namespace ExportLog {
 		_MarkdownRendererInternal._reportProgress(fraction, message, subMessage, progressColor);
 	}
 
-	export function startDocumentProgress(total: number, phaseTotal: number = total): void {
-		_MarkdownRendererInternal._startDocumentProgress(total, phaseTotal);
+	export function startDocumentProgress(
+		total: number,
+		phaseTotal: number = total,
+		operationTotal: number = total
+	): void {
+		_MarkdownRendererInternal._startDocumentProgress(
+			total,
+			phaseTotal,
+			operationTotal
+		);
+	}
+
+	export function startWorkPhase(phaseTotal: number): void {
+		_MarkdownRendererInternal._startWorkPhase(phaseTotal);
 	}
 
 	export function endDocumentProgress(): void {
 		_MarkdownRendererInternal._endDocumentProgress();
 	}
 
-	export function setRemainingWorkItems(remaining: number): void {
-		_MarkdownRendererInternal._setRemainingWorkItems(remaining);
+	export function setRemainingWorkItems(
+		remaining: number,
+		phaseTotal: number = remaining
+	): void {
+		_MarkdownRendererInternal._setRemainingWorkItems(remaining, phaseTotal);
+	}
+
+	export function setRemainingOperationItems(remaining: number): void {
+		_MarkdownRendererInternal._setRemainingOperationItems(remaining);
 	}
 
 	export function advanceWorkProgress(
 		count: number = 1,
 		message: string = "",
 		subMessage: string = "",
-		progressColor: string = "var(--interactive-accent)"
+		progressColor: string = "var(--interactive-accent)",
+		operationCount: number = 1
 	): void {
 		currentProgress += count;
-		_MarkdownRendererInternal._advanceWorkProgress(count, message, subMessage, progressColor);
+		_MarkdownRendererInternal._advanceWorkProgress(
+			count,
+			message,
+			subMessage,
+			progressColor,
+			operationCount
+		);
 	}
 
 	export function setFileList(items: string[], options: { icons?: string[] | string, renderAsMarkdown?: boolean, title?: string }) {

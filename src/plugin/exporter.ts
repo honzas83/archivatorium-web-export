@@ -95,9 +95,18 @@ export class HTMLExporter
 				{
 					const newAttachments = website.index.newFiles.filter((f) => !(f instanceof Webpage));
 					const updatedAttachments = website.index.updatedFiles.filter((f) => !(f instanceof Webpage));
-					ExportLog.setRemainingWorkItems(newAttachments.length + updatedAttachments.length);
-					await Utils.downloadAttachments(newAttachments);
-					await Utils.downloadAttachments(updatedAttachments);
+					const attachmentCount =
+						newAttachments.length + updatedAttachments.length;
+					ExportLog.setRemainingOperationItems(attachmentCount);
+					ExportLog.startWorkPhase(attachmentCount);
+					await Utils.downloadAttachments(
+						newAttachments,
+						website.outputProgressWeight
+					);
+					await Utils.downloadAttachments(
+						updatedAttachments,
+						website.outputProgressWeight
+					);
 
 					if (Settings.exportPreset != ExportPreset.RawDocuments)
 					{
@@ -120,6 +129,7 @@ export class HTMLExporter
 			ExportLog.error(e, "Export Failed", true);
 		}
 
+		ExportLog.setRemainingWorkItems(0, 0);
 		ExportLog.endDocumentProgress();
 		MarkdownRendererAPI.endBatch();
 

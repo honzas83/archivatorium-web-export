@@ -20,6 +20,9 @@ export class FileTree extends Tree
 	public files: Path[];
 	public keepOriginalExtensions: boolean;
 	public sort: boolean;
+	public onFileProcessed:
+		| ((completed: number, total: number, file: Path) => void)
+		| undefined;
 
     /** Map from source vault path to FileTreeItem for quick lookup */
     public pathToItem: Map<string, FileTreeItem> = new Map();
@@ -57,6 +60,7 @@ export class FileTree extends Tree
         this.children = [];
         this.pathToItem.clear();
 
+		let completedFiles = 0;
 		for (const file of filteredFiles)
 		{
 			const pathSections: Path[] = [];
@@ -127,6 +131,9 @@ export class FileTree extends Tree
 				}
 				currentParentNode.href = targetPath.path; // This is the output href
 			}
+
+			completedFiles++;
+			this.onFileProcessed?.(completedFiles, filteredFiles.length, file);
 		}
 
 		if (this.sort) 

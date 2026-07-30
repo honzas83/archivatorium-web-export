@@ -108,10 +108,11 @@ export class Webpage extends Attachment
 	public async generateOutput()
 	{
 		const output = new WebpageOutputData();
+		const description = this.descriptionOrShortenedContent;
 		output.html = this.html;
 		output.title = this.title;
 		output.icon = this.icon;
-		output.description = this.descriptionOrShortenedContent;
+		output.description = description;
 		output.author = this.author;
 		output.fullURL = this.fullURL;
 		output.rssDate = this.rssDate;
@@ -124,7 +125,7 @@ export class Webpage extends Attachment
 		output.backlinks = this.backlinks;
 		output.headings = this.headings;
 		output.renderedHeadings = await this.getRenderedHeadings();
-		output.descriptionOrShortenedContent = this.descriptionOrShortenedContent;
+		output.descriptionOrShortenedContent = description;
 		output.searchContent = this.searchContent;
 		output.srcLinks = this.srcLinks;
 		output.hrefLinks = this.hrefLinks;
@@ -290,15 +291,11 @@ export class Webpage extends Attachment
 
 	private async getRenderedHeadings(): Promise<{ heading: string; level: number; id: string; }[]>
 	{
-		const headings = this.headings.map((header) => {return {heading: header.heading, level: header.level, id: header.id}});
-		
-		for (const header of headings)
-		{
-			const h = await MarkdownRendererAPI.renderMarkdownSimple(header.heading) ?? header.heading;
-			header.heading = h;
-		}
-
-		return headings;
+		return this.headings.map((header) => ({
+			heading: header.headingEl.innerHTML || header.heading,
+			level: header.level,
+			id: header.id,
+		}));
 	}
 
 	private get aliases(): string[]
@@ -315,102 +312,40 @@ export class Webpage extends Attachment
 	private get descriptionOrShortenedContent(): string
 	{
 		let description = this.description;
-		let localThis = this;
 
 		if (!description)
 		{
 			if(!this.viewElement) return "";
-			const content = this.viewElement.cloneNode(true) as HTMLElement;
-			content.querySelectorAll(`h1, h2, h3, h4, h5, h6, .mermaid, table, mjx-container, style, script, 
-.mod-header, .mod-footer, .metadata-container, .frontmatter, img[src^="data:"]`).forEach((heading) => heading.remove());
-
-			// update image links
-			content.querySelectorAll("[src]").forEach((el: HTMLImageElement) => 
-			{
-				let src = el.getAttribute("src");
-				if (!src) return;
-				if (src.startsWith("http") || src.startsWith("data:")) return;
-				if (src.startsWith("data:")) 
-				{
-					el.remove();
-					return;
-				}
-				src = src.replace("app://obsidian", "");
-				src = src.replace(".md", "");
-				const path = Path.joinStrings(this.exportOptions.rssOptions.siteUrl ?? "", src);
-				el.setAttribute("src", path.path);
-			});
-
-			// update normal links
-			content.querySelectorAll("[href]").forEach((el: HTMLAnchorElement) => 
-			{
-				let href = el.getAttribute("href");
-				if (!href) return; 
-				if (href.startsWith("http") || href.startsWith("data:")) return;
-				href = href.replace("app://obsidian", "");
-				href = href.replace(".md", "");
-				const path = Path.joinStrings(this.exportOptions.rssOptions.siteUrl ?? "", href);
-				el.setAttribute("href", path.path);
-			});
-
-			function keepTextLinksImages(element: HTMLElement) 
-			{
-				const walker = localThis.pageDocument.createTreeWalker(element, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT);
-				let node;
-				const nodes = [];
-				while (node = walker.nextNode()) 
-				{
-					if (node.nodeType == Node.ELEMENT_NODE)
-					{
-						const element = node as HTMLElement;
-						if (element.tagName == "A" || element.tagName == "IMG" || element.tagName == "BR")
-						{
-							nodes.push(element);
-						}
-
-						if (element.tagName == "DIV")
-						{
-							const classes = element.parentElement?.classList;
-							if (classes?.contains("heading-children") || classes?.contains("markdown-preview-sizer"))
-							{
-								nodes.push(document.createElement("br"));
-							}
-						}
-
-						if (element.tagName == "LI") 
-						{
-							nodes.push(document.createElement("br"));
-						}
-					}
-					else
-					{
-						if (node.parentElement?.tagName != "A" && node.parentElement?.tagName != "IMG")
-							nodes.push(node);
-					}
-				}
-
-				element.innerHTML = "";
-				element.append(...nodes);
+			const maxDescriptionLength = 500;
+			const skipSelector = [
+				"h1", "h2", "h3", "h4", "h5", "h6",
+				".mermaid", "table", "mjx-container", "style", "script",
+				".mod-header", ".mod-footer", ".metadata-container",
+				".frontmatter",
+			].join(",");
+			const walker = this.pageDocument.createTreeWalker(
+				this.viewElement,
+				NodeFilter.SHOW_TEXT
+			);
+			const parts: string[] = [];
+			let length = 0;
+			let node: Node | null;
+			while (
+				length < maxDescriptionLength &&
+				(node = walker.nextNode())
+			) {
+				if (node.parentElement?.closest(skipSelector)) continue;
+				const text = node.textContent?.trim();
+				if (!text) continue;
+				parts.push(text);
+				length += text.length + 1;
 			}
-
-			
-			keepTextLinksImages(content);
-
-			//remove subsequent br tags
-			content.querySelectorAll("br").forEach((br: HTMLElement) => 
-			{
-				const next = br.nextElementSibling;
-				if (next?.tagName == "BR") br.remove();
-			});
-
-			// remove br tags at the start and end of the content
-			const first = content.firstElementChild;
-			if (first?.tagName == "BR") first.remove();
-			const last = content.lastElementChild;
-			if (last?.tagName == "BR") last.remove();
-
-			description = content.innerHTML;
-			content.remove();
+			description = parts.join(" ");
+			if (description.length > maxDescriptionLength) {
+				description =
+					description.substring(0, maxDescriptionLength).trimEnd() +
+					"...";
+			}
 		}
 
 		// remove multiple whitespace characters in a row

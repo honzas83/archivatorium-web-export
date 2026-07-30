@@ -29,6 +29,9 @@ export class Website
 	public fileTreeAsset: AssetLoader;
 	public webpageTemplate: WebpageTemplate;
 	public exportOptions: ExportPipelineOptions;
+	public outputProgressWeight: number = 1;
+	private totalProgressWeight: number = 1;
+	private fileTreeProgressBudget: number = 0;
 
 	constructor(destination: Path | string, options?: ExportPipelineOptions)
 	{
@@ -122,11 +125,24 @@ export class Website
 	public async load(files?: TFile[]): Promise<this>
 	{
 		ExportLog.resetProgress();
-		ExportLog.addToProgressCap((files?.length ?? 0));
-		ExportLog.addToProgressCap((files?.length ?? 0) * 0.1);
-
 		this.sourceFiles = files?.filter((file) => file) ?? [];
-		await this.writeProgress("initializing", 0, this.sourceFiles.length);
+		// Indexing is intentionally excluded from export progress. It prepares
+		// the workload, while the measured work starts with the optional file
+		// tree and continues through page and attachment output.
+		this.totalProgressWeight = Math.max(1, this.sourceFiles.length);
+		this.fileTreeProgressBudget = this.exportOptions.fileNavigationOptions.enabled
+			? this.totalProgressWeight * 0.05
+			: 0;
+		const estimatedOperationTotal =
+			this.sourceFiles.length * (
+				this.exportOptions.fileNavigationOptions.enabled ? 2 : 1
+			);
+		ExportLog.startDocumentProgress(
+			this.totalProgressWeight,
+			this.sourceFiles.length,
+			estimatedOperationTotal
+		);
+		await this.writeProgress("indexing-files", 0, this.sourceFiles.length);
 
 		let rootPath = this.findCommonRootPath(this.sourceFiles);
 		this.exportOptions.exportRoot = rootPath;
@@ -184,18 +200,26 @@ export class Website
 					await this.index.addFile(webpage, false);
 				}
 
-				ExportLog.progress(0.1, "Initializing Document", file.path, "var(--color-yellow)");
-				initializedFiles++;
-				if (initializedFiles % 250 === 0)
-				{
-					await this.writeProgress("initializing", initializedFiles, this.sourceFiles.length);
-				}
-				if (initializedFiles % 100 === 0) await Utils.delay(0);
 			}
 			catch (error)
 			{
-				ExportLog.error(error, "Problem initializing document: " + file.path);
-				continue;
+				ExportLog.error(error, "Problem indexing file: " + file.path);
+			}
+			finally
+			{
+				initializedFiles++;
+				ExportLog.advanceWorkProgress(
+					0,
+					"Indexing Files",
+					`${initializedFiles}/${this.sourceFiles.length}: ${file.path}`,
+					"var(--color-yellow)",
+					0
+				);
+				if (initializedFiles % 250 === 0)
+				{
+					await this.writeProgress("indexing-files", initializedFiles, this.sourceFiles.length);
+				}
+				if (initializedFiles % 100 === 0) await Utils.delay(0);
 			}
 		}
 
@@ -208,7 +232,26 @@ export class Website
 			if (this.exportOptions.fileNavigationOptions.enabled)
 			{
 				const paths = this.index.attachmentsShownInTree.map((file) => new Path(file.sourcePathRootRelative ?? ""));
+				ExportLog.setRemainingOperationItems(
+					paths.length + this.sourceFiles.length
+				);
+				ExportLog.startWorkPhase(paths.length);
+				ExportLog.setProgress(
+					0,
+					"Building File Tree",
+					`0/${paths.length} files`,
+					"var(--color-yellow)"
+				);
 				this.fileTree = new FileTree(paths, false, true);
+				this.fileTree.onFileProcessed = (completed, total, path) =>
+				{
+					ExportLog.advanceWorkProgress(
+						this.fileTreeProgressBudget / Math.max(1, total),
+						"Building File Tree",
+						`${completed}/${total}: ${path.path}`,
+						"var(--color-yellow)"
+					);
+				};
 				this.fileTree.makeLinksWebStyle = this.exportOptions.slugifyPaths ?? true;
 				this.fileTree.showNestingIndicator = true;
 				this.fileTree.generateWithItemsClosed = true;
@@ -256,7 +299,7 @@ export class Website
 		console.log(`Creating website with ${this.sourceFiles.length} files.`);
 
 		await this.buildTemplate();
-		await this.writeProgress("rendering", 0, this.index.webpages.length);
+		await this.writeProgress("rendering-and-writing-pages", 0, this.index.webpages.length);
 		
 		// this.refreshUpdatedFilesList();
 		
@@ -292,19 +335,25 @@ export class Website
 		);
 		const initialWorkTotal = webpages.length +
 			(this.exportOptions.combineAsSingleFile ? 0 : pendingAttachmentPaths.size);
-		ExportLog.startDocumentProgress(initialWorkTotal, webpages.length);
+		ExportLog.setRemainingOperationItems(initialWorkTotal);
+		ExportLog.startWorkPhase(webpages.length);
+		const completedPreparationBudget =
+			this.fileTreeProgressBudget;
+		this.outputProgressWeight = initialWorkTotal > 0
+			? (this.totalProgressWeight - completedPreparationBudget) / initialWorkTotal
+			: 0;
 		const completeDocument = async (subMessage: string): Promise<void> =>
 		{
 			progress += 1;
 			ExportLog.advanceWorkProgress(
-				1,
-				"Building Webpages",
+				this.outputProgressWeight,
+				"Rendering and Writing Pages",
 				subMessage,
 				"var(--interactive-accent)"
 			);
 			if (progress % 25 === 0)
 			{
-				await this.writeProgress("rendering", progress, webpages.length);
+				await this.writeProgress("rendering-and-writing-pages", progress, webpages.length);
 			}
 			if (progress % 500 === 0)
 			{
@@ -317,7 +366,11 @@ export class Website
 		{
 			if (ExportLog.isCancelled()) return;
 
-			ExportLog.progress(0, "Building Webpages", webpage.source.path);
+			ExportLog.setProgress(
+				0,
+				"Rendering and Writing Pages",
+				webpage.source.path
+			);
 
 			const rendered = await webpage.renderDocument();
 			if (!rendered)

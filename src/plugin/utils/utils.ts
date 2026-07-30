@@ -78,10 +78,13 @@ export namespace Utils
 		mode && await view.setMode(mode);
 	};
 
-	export async function downloadAttachments(files: Attachment[])
+	export async function downloadAttachments(
+		files: Attachment[],
+		progressWeight: number = 1
+	)
 	{
 		ExportLog.addToProgressCap(files.length);
-		ExportLog.progress(0, "Saving files to disk", "...", "var(--color-green)");
+		ExportLog.setProgress(0, "Saving Attachments", "...", "var(--color-green)");
 
 		let complete = 0;
 
@@ -106,8 +109,8 @@ export namespace Utils
 				{
 					complete++;
 					ExportLog.advanceWorkProgress(
-						1,
-						"Saving files to disk",
+						progressWeight,
+						"Saving Attachments",
 						`${saved ? "Saved" : "Failed"} (${complete}/${files.length}): ${file.filename}`,
 						"var(--color-green)"
 					);
