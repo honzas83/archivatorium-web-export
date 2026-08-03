@@ -453,7 +453,8 @@ export class Webpage extends Attachment
 		values.push(text);
 
 		const normalized = this.normalizeMetadataValue(text);
-		if (normalized && normalized !== text.toLowerCase()) values.push(normalized);
+		// Full text search already tokenizes phrases; compact copies only help identifiers.
+		if (!/\s/.test(text) && normalized && normalized !== text.toLowerCase()) values.push(normalized);
 	}
 
 	private collectMetadataValues(value: any, values: string[]): void
@@ -504,7 +505,7 @@ export class Webpage extends Attachment
 	private get linksToOtherFiles(): string[]
 	{
 		const links = this.hrefLinks;
-		const otherFiles = links.filter((link) => !link.startsWith("#") && !link.startsWith(Shared.libFolderName + "/") && !link.startsWith("http") && !link.startsWith("data:"));
+		const otherFiles = links.filter((link) => !link.startsWith("#") && !link.startsWith("?query=tag:") && !link.startsWith(Shared.libFolderName + "/") && !link.startsWith("http") && !link.startsWith("data:"));
 		return otherFiles;
 	}
 
