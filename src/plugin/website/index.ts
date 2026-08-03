@@ -917,7 +917,7 @@ export class Index
 		const headersInfo = [...await webpage.outputData.renderedHeadings];
 		if (headersInfo.length > 0 && headersInfo[0].level == 1 && headersInfo[0].heading == webpage.title) headersInfo.shift();
 		const headers = headersInfo.map((header) => header.heading);
-		const content = `${webpage.outputData.metadataSearchText} ${webpage.outputData.description} ${webpage.outputData.searchContent}`;
+		const content = webpage.outputData.searchContent;
 
 		if (this.exportOptions.searchOptions.serverSide)
 		{
@@ -929,7 +929,6 @@ export class Index
 				search: {
 					metadata: webpage.outputData.metadataSearchText,
 					headers,
-					tags: webpage.outputData.allTags,
 					content,
 				},
 			});

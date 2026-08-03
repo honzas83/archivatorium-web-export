@@ -199,10 +199,13 @@ async function initializeCorpusDatabase() {
 						if (typeof value === "string" && value) insertRedirect.run(value, data.exportPath);
 					}
 					if (record.kind === "webpage" && record.search) {
+						const tags = [
+							...new Set([...(data.frontmatterTags ?? []), ...(data.inlineTags ?? [])]),
+						];
 						insertSearch.run(
 							data.exportPath, data.sourcePath, data.title ?? data.exportPath,
 							record.search.metadata ?? "", joinSearchValues(data.aliases),
-							joinSearchValues(record.search.headers), joinSearchValues(record.search.tags), record.search.content ?? ""
+							joinSearchValues(record.search.headers), joinSearchValues(tags), record.search.content ?? ""
 						);
 					}
 					updateState.run(entry.name, data.exportPath, recordStat.mtimeMs, recordStat.size);

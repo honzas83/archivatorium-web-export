@@ -7,7 +7,6 @@ export interface ServerSearchData
 {
 	metadata: string;
 	headers: string[];
-	tags: string[];
 	content: string;
 }
 

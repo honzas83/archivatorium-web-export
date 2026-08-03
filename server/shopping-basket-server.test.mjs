@@ -47,7 +47,6 @@ test("server indexes the unified corpus and keeps it private", async () => {
 		search: {
 			metadata: "citekey example2026",
 			headers: ["Relevant heading"],
-			tags: ["Topic/Child"],
 			content: "Complete searchable text remains available.",
 		},
 	}));

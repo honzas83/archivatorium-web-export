@@ -174,9 +174,6 @@ export class Webpage extends Attachment
 			content += ' ' + node.textContent + ' ';
 		}
 
-		content += this.hrefLinks.join(" ");
-		content += this.srcLinks.join(" ");
-
 		content = content.trim().replace(/\s+/g, ' ');
 
 		return content;
