@@ -146,7 +146,20 @@ export class Webpage extends Attachment
 			return "";
 		}
 
-		const skipSelector = ".math, svg, img, .frontmatter, .metadata-container, .heading-after, style, script";
+		const skipSelector = [
+			".math", "svg", "img", ".frontmatter", ".metadata-container", ".heading-after", "style", "script",
+		].join(", ");
+		function isExcludedCallout(element: HTMLElement | null): boolean
+		{
+			const callout = element?.closest(".callout") as HTMLElement | null;
+			if (!callout) return false;
+
+			const type = callout.getAttribute("data-callout")?.trim().toLowerCase();
+			if (type === "citing this document") return true;
+
+			const title = callout.querySelector(".callout-title-inner")?.textContent?.trim().toLowerCase();
+			return title === "metadata";
+		}
 		function getTextNodes(element: HTMLElement): Node[]
 		{
 			const textNodes = [];
@@ -155,7 +168,7 @@ export class Webpage extends Attachment
 			let node;
 			while (node = walker.nextNode()) 
 			{
-				if (node.parentElement?.closest(skipSelector))
+				if (node.parentElement?.closest(skipSelector) || isExcludedCallout(node.parentElement))
 				{
 					continue;
 				}
