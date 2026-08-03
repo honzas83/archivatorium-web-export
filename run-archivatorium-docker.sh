@@ -35,6 +35,10 @@ if [[ ! -d "$VAULT_PATH" ]]; then
   echo "Vault directory not found: $VAULT_PATH" >&2
   exit 1
 fi
+VAULT_PATH="$(realpath "$VAULT_PATH")"
+
+mkdir -p "$OUTPUT_PATH"
+OUTPUT_PATH="$(realpath "$OUTPUT_PATH")"
 
 if [[ ! -f "$CONFIG_PATH" ]]; then
   echo "Configuration file not found: $CONFIG_PATH" >&2
@@ -68,8 +72,6 @@ if [[ -L "$PLUGIN_PATH" ]]; then
   mkdir -p "$PLUGIN_PATH"
   echo "Temporarily replacing plugin symlink with a Docker-compatible directory"
 fi
-
-mkdir -p "$OUTPUT_PATH"
 
 echo "Building Docker image $IMAGE_NAME from $REPO_ROOT"
 docker build --tag "$IMAGE_NAME" "$REPO_ROOT"
