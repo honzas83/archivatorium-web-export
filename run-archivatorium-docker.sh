@@ -5,6 +5,7 @@ set -Eeuo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${EXPORT_REPO_ROOT:-$SCRIPT_DIR}"
 IMAGE_NAME="${EXPORT_IMAGE:-archivatorium-web-export:local}"
+CONTAINER_NAME="${EXPORT_CONTAINER_NAME:-archivatorium-web-export}"
 EXPORT_MEMORY="${EXPORT_MEMORY:-12g}"
 EXPORT_MEMORY_SWAP="${EXPORT_MEMORY_SWAP:-16g}"
 EXPORT_RESTART_AFTER_RENDERED_FILES="${EXPORT_RESTART_AFTER_RENDERED_FILES:-1000}"
@@ -78,6 +79,7 @@ docker build --tag "$IMAGE_NAME" "$REPO_ROOT"
 
 docker_args=(
   docker run --rm
+  --name "$CONTAINER_NAME"
   --memory "$EXPORT_MEMORY"
   --memory-swap "$EXPORT_MEMORY_SWAP"
   --env EXPORT_ENTIRE_VAULT=1
@@ -90,6 +92,7 @@ docker_args=(
 
 echo "Exporting vault: $VAULT_PATH"
 echo "Writing output:  $OUTPUT_PATH"
+echo "Container name:   $CONTAINER_NAME"
 echo "Container memory: $EXPORT_MEMORY (memory+swap: $EXPORT_MEMORY_SWAP)"
 if [[ "$EXPORT_RESTART_AFTER_RENDERED_FILES" -gt 0 ]]; then
   echo "Planned restart interval: $EXPORT_RESTART_AFTER_RENDERED_FILES newly rendered files"
