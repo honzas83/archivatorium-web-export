@@ -187,6 +187,11 @@ export class Webpage extends Attachment
 			content += ' ' + node.textContent + ' ';
 		}
 
+		for (const tag of this.allTags.sort((first, second) => second.length - first.length))
+		{
+			content = content.replaceAll(tag, " ");
+		}
+
 		content = content.trim().replace(/\s+/g, ' ');
 
 		return content;
