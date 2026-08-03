@@ -154,11 +154,11 @@ export class Webpage extends Attachment
 			const callout = element?.closest(".callout") as HTMLElement | null;
 			if (!callout) return false;
 
-			const type = callout.getAttribute("data-callout")?.trim().toLowerCase();
-			if (type === "citing this document") return true;
-
-			const title = callout.querySelector(".callout-title-inner")?.textContent?.trim().toLowerCase();
-			return title === "metadata";
+			const normalizeCalloutLabel = (value: string | null | undefined) =>
+				value?.toLowerCase().replace(/[^a-z0-9]/g, "") ?? "";
+			const type = normalizeCalloutLabel(callout.getAttribute("data-callout"));
+			const title = normalizeCalloutLabel(callout.querySelector(".callout-title-inner")?.textContent);
+			return type === "citingthisdocument" || title === "citingthisdocument" || title === "metadata";
 		}
 		function getTextNodes(element: HTMLElement): Node[]
 		{
