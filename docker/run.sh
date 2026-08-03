@@ -6,7 +6,7 @@ mkdir -p "$PLUGIN_DIR"
 # Always run the plugin bundled into this image while preserving vault settings.
 cp /plugin/main.js /plugin/manifest.json /plugin/styles.css "$PLUGIN_DIR/"
 
-if [[ -f /config.json ]]; then
+if [[ -f /config.json && ! /config.json -ef "$PLUGIN_DIR/data.json" ]]; then
   cp /config.json "$PLUGIN_DIR/data.json"
 fi
 
