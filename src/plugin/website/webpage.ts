@@ -289,7 +289,7 @@ export class Webpage extends Attachment
 	private async getRenderedHeadings(): Promise<{ heading: string; level: number; id: string; }[]>
 	{
 		return this.headings.map((header) => ({
-			heading: header.headingEl.innerHTML || header.heading,
+			heading: header.heading,
 			level: header.level,
 			id: header.id,
 		}));
