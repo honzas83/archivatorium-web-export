@@ -26,10 +26,12 @@ export default class HTMLExportPlugin extends Plugin {
 
 	public async exportDocker() {
 		await HTMLExporter.export(true, undefined, new Path("/output"));
+		if (!HTMLExporter.lastExportSucceeded) throw new Error("Export did not complete.");
 	}
 
 	public async exportVault(path: string) {
 		await HTMLExporter.exportVault(new Path(path), true, false);
+		if (!HTMLExporter.lastExportSucceeded) throw new Error("Export did not complete.");
 	}
 
 	async onload() {

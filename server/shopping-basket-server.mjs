@@ -17,16 +17,19 @@ const EXPORT_ROOT = process.env.EXPORT_ROOT
 const PUBLIC_ARCHIVE_ROOT = process.env.PUBLIC_ARCHIVE_ROOT ?? "";
 const MAX_REQUEST_BYTES = Number(process.env.MAX_CHECKOUT_BYTES ?? 1_000_000);
 const MAX_CHECKOUT_ITEMS = Number(process.env.MAX_CHECKOUT_ITEMS ?? 5000);
-const SEARCH_CORPUS_ROOT = path.join(EXPORT_ROOT, "site-lib", "search-corpus");
+const CORPUS_ROOT = path.join(EXPORT_ROOT, "site-lib", "corpus");
 const SEARCH_DATA_ROOT = path.join(EXPORT_ROOT, ".server-data");
-const SEARCH_DATABASE_PATH = path.join(SEARCH_DATA_ROOT, "search.sqlite");
+const CORPUS_DATABASE_PATH = path.join(SEARCH_DATA_ROOT, "corpus.sqlite");
 const SEARCH_VALUE_SEPARATOR = "\u001f";
-let searchDatabasePromise;
-const searchStatus = {
+const INDEX_COMMIT_INTERVAL = Math.max(1, Number(process.env.INDEX_COMMIT_INTERVAL ?? 500));
+let corpusDatabasePromise;
+const corpusStatus = {
 	state: "idle",
 	processed: 0,
 	total: 0,
 };
+const searchStatus = corpusStatus;
+const metadataStatus = corpusStatus;
 
 const contentTypes = new Map([
 	[".html", "text/html; charset=utf-8"],
@@ -93,110 +96,212 @@ function splitSearchValues(value) {
 	return value ? String(value).split(SEARCH_VALUE_SEPARATOR) : [];
 }
 
-async function initializeSearchDatabase() {
-	searchStatus.state = "indexing";
-	searchStatus.processed = 0;
+function logIndexProgress(name, status, filename) {
+	console.log(`[companion-${name}] ${status.processed}/${status.total} ${filename}`);
+}
+
+function commitIndexBatch(database, name, status) {
+	database.exec("COMMIT");
+	console.log(`[companion-${name}] committed ${status.processed}/${status.total}`);
+	database.exec("BEGIN IMMEDIATE");
+}
+
+async function initializeCorpusDatabase() {
+	corpusStatus.state = "indexing";
+	corpusStatus.processed = 0;
 	await mkdir(SEARCH_DATA_ROOT, { recursive: true });
-	const database = new DatabaseSync(SEARCH_DATABASE_PATH);
+	const database = new DatabaseSync(CORPUS_DATABASE_PATH);
 	database.exec(`
 		PRAGMA journal_mode = WAL;
 		PRAGMA synchronous = NORMAL;
 		CREATE VIRTUAL TABLE IF NOT EXISTS search_documents USING fts5(
-			path,
-			source_path UNINDEXED,
-			title,
-			metadata,
-			aliases,
-			headers,
-			tags,
-			content,
+			path, source_path UNINDEXED, title, metadata, aliases, headers, tags, content,
 			tokenize = 'unicode61 remove_diacritics 2'
 		);
-		CREATE TABLE IF NOT EXISTS search_corpus_state (
-			filename TEXT PRIMARY KEY,
-			path TEXT NOT NULL,
-			modified_time REAL NOT NULL,
-			size INTEGER NOT NULL
+		CREATE TABLE IF NOT EXISTS metadata_documents (
+			export_path TEXT PRIMARY KEY, source_path TEXT NOT NULL, kind TEXT NOT NULL,
+			title TEXT, inline_tags TEXT, frontmatter_tags TEXT, show_in_tree INTEGER NOT NULL,
+			tree_order INTEGER NOT NULL, type TEXT, data TEXT NOT NULL
 		);
+		CREATE TABLE IF NOT EXISTS metadata_redirects (
+			value TEXT PRIMARY KEY, export_path TEXT NOT NULL
+		);
+		CREATE TABLE IF NOT EXISTS corpus_state (
+			filename TEXT PRIMARY KEY, export_path TEXT NOT NULL, modified_time REAL NOT NULL, size INTEGER NOT NULL
+		);
+		CREATE INDEX IF NOT EXISTS metadata_documents_source_path ON metadata_documents(source_path);
+		CREATE INDEX IF NOT EXISTS metadata_documents_tree ON metadata_documents(show_in_tree, tree_order);
 	`);
 
-	const knownRecords = new Map(
-		database.prepare("SELECT filename, path, modified_time, size FROM search_corpus_state")
-			.all()
-			.map((record) => [record.filename, record])
+	const knownRecords = new Map(database.prepare(
+		"SELECT filename, export_path, modified_time, size FROM corpus_state"
+	).all().map((record) => [record.filename, record]));
+	const deleteMetadata = database.prepare("DELETE FROM metadata_documents WHERE export_path = ?");
+	const deleteRedirects = database.prepare("DELETE FROM metadata_redirects WHERE export_path = ?");
+	const deleteSearch = database.prepare("DELETE FROM search_documents WHERE path = ?");
+	const deleteState = database.prepare("DELETE FROM corpus_state WHERE filename = ?");
+	const insertMetadata = database.prepare(`
+		INSERT OR REPLACE INTO metadata_documents(
+			export_path, source_path, kind, title, inline_tags, frontmatter_tags,
+			show_in_tree, tree_order, type, data
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`);
+	const insertRedirect = database.prepare(
+		"INSERT OR IGNORE INTO metadata_redirects(value, export_path) VALUES (?, ?)"
 	);
-	const seenFilenames = new Set();
-	const deleteDocument = database.prepare("DELETE FROM search_documents WHERE path = ?");
-	const insertDocument = database.prepare(`
+	const insertSearch = database.prepare(`
 		INSERT INTO search_documents(path, source_path, title, metadata, aliases, headers, tags, content)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 	`);
 	const updateState = database.prepare(`
-		INSERT OR REPLACE INTO search_corpus_state(filename, path, modified_time, size)
+		INSERT OR REPLACE INTO corpus_state(filename, export_path, modified_time, size)
 		VALUES (?, ?, ?, ?)
 	`);
-	const deleteState = database.prepare("DELETE FROM search_corpus_state WHERE filename = ?");
 
 	let entries = [];
 	try {
-		entries = await readdir(SEARCH_CORPUS_ROOT, { withFileTypes: true });
+		entries = await readdir(CORPUS_ROOT, { withFileTypes: true });
 	} catch (error) {
 		if (error?.code !== "ENOENT") throw error;
 	}
 	const corpusEntries = entries.filter((entry) => entry.isFile() && entry.name.endsWith(".json"));
-	searchStatus.total = corpusEntries.length;
+	corpusStatus.total = corpusEntries.length;
+	console.log(`[companion-corpus] indexing ${corpusStatus.total} files from ${CORPUS_ROOT}`);
+	const seen = new Set();
 
 	database.exec("BEGIN IMMEDIATE");
 	try {
 		for (const entry of corpusEntries) {
-			seenFilenames.add(entry.name);
-			const recordPath = path.join(SEARCH_CORPUS_ROOT, entry.name);
+			seen.add(entry.name);
+			corpusStatus.processed++;
+			logIndexProgress("corpus", corpusStatus, entry.name);
+			const recordPath = path.join(CORPUS_ROOT, entry.name);
 			const recordStat = await stat(recordPath);
 			const previous = knownRecords.get(entry.name);
-			if (previous?.modified_time === recordStat.mtimeMs && previous?.size === recordStat.size) {
-				searchStatus.processed++;
-				continue;
+			if (previous?.modified_time !== recordStat.mtimeMs || previous?.size !== recordStat.size) {
+				const record = JSON.parse(await readFile(recordPath, "utf8"));
+				const data = record?.data;
+				if (data?.exportPath && data?.sourcePath) {
+					if (previous?.export_path) {
+						deleteMetadata.run(previous.export_path);
+						deleteRedirects.run(previous.export_path);
+						deleteSearch.run(previous.export_path);
+					}
+					deleteMetadata.run(data.exportPath);
+					deleteRedirects.run(data.exportPath);
+					deleteSearch.run(data.exportPath);
+					insertMetadata.run(
+						data.exportPath, data.sourcePath, record.kind ?? "file", data.title ?? data.exportPath,
+						joinSearchValues(data.inlineTags), joinSearchValues(data.frontmatterTags),
+						data.showInTree ? 1 : 0, Number(data.treeOrder ?? 0), String(data.type ?? ""), JSON.stringify(data)
+					);
+					for (const value of record.redirectValues ?? []) {
+						if (typeof value === "string" && value) insertRedirect.run(value, data.exportPath);
+					}
+					if (record.kind === "webpage" && record.search) {
+						insertSearch.run(
+							data.exportPath, data.sourcePath, data.title ?? data.exportPath,
+							record.search.metadata ?? "", joinSearchValues(data.aliases),
+							joinSearchValues(record.search.headers), joinSearchValues(record.search.tags), record.search.content ?? ""
+						);
+					}
+					updateState.run(entry.name, data.exportPath, recordStat.mtimeMs, recordStat.size);
+				}
 			}
-
-			const record = JSON.parse(await readFile(recordPath, "utf8"));
-			if (!record?.path || !record?.sourcePath) continue;
-
-			if (previous?.path) deleteDocument.run(previous.path);
-			deleteDocument.run(record.path);
-			insertDocument.run(
-				record.path,
-				record.sourcePath,
-				record.title ?? record.path,
-				record.metadata ?? "",
-				joinSearchValues(record.aliases),
-				joinSearchValues(record.headers),
-				joinSearchValues(record.tags),
-				record.content ?? "",
-			);
-			updateState.run(entry.name, record.path, recordStat.mtimeMs, recordStat.size);
-			searchStatus.processed++;
+			if (corpusStatus.processed % INDEX_COMMIT_INTERVAL === 0) {
+				commitIndexBatch(database, "corpus", corpusStatus);
+			}
 		}
-
 		for (const [filename, previous] of knownRecords) {
-			if (seenFilenames.has(filename)) continue;
-			deleteDocument.run(previous.path);
+			if (seen.has(filename)) continue;
+			deleteMetadata.run(previous.export_path);
+			deleteRedirects.run(previous.export_path);
+			deleteSearch.run(previous.export_path);
 			deleteState.run(filename);
 		}
 		database.exec("COMMIT");
 	} catch (error) {
 		database.exec("ROLLBACK");
 		database.close();
-		searchStatus.state = "error";
+		corpusStatus.state = "error";
 		throw error;
 	}
 
-	searchStatus.state = "ready";
+	corpusStatus.state = "ready";
+	console.log(`[companion-corpus] ready: ${corpusStatus.processed}/${corpusStatus.total}`);
 	return database;
 }
 
-function getSearchDatabase() {
-	searchDatabasePromise ??= initializeSearchDatabase();
-	return searchDatabasePromise;
+function getCorpusDatabase() {
+	corpusDatabasePromise ??= initializeCorpusDatabase();
+	return corpusDatabasePromise;
+}
+
+function buildTagTree(rows, showInlineTags, showFrontmatterTags) {
+	const root = new Map();
+	for (const row of rows) {
+		const tags = new Set([
+			...(showInlineTags ? splitSearchValues(row.inline_tags) : []),
+			...(showFrontmatterTags ? splitSearchValues(row.frontmatter_tags) : []),
+		]);
+		for (const tag of tags) {
+			let nodes = root;
+			let currentPath = "";
+			for (const part of String(tag).replace(/^#+/, "").split("/").map((value) => value.trim()).filter(Boolean)) {
+				currentPath = currentPath ? `${currentPath}/${part}` : part;
+				let node = nodes.get(part);
+				if (!node) {
+					node = { name: part, path: currentPath, count: 0, children: new Map() };
+					nodes.set(part, node);
+				}
+				node.count++;
+				nodes = node.children;
+			}
+		}
+	}
+	const serialize = (nodes) => Array.from(nodes.values())
+		.sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" }))
+		.map((node) => ({ name: node.name, path: node.path, count: node.count, children: serialize(node.children) }));
+	return serialize(root);
+}
+
+async function handleMetadataBootstrap(_request, response) {
+	try {
+		const metadata = JSON.parse(await readFile(path.join(EXPORT_ROOT, "site-lib", "metadata.json"), "utf8"));
+		const database = await getCorpusDatabase();
+		const rows = database.prepare(
+			"SELECT inline_tags, frontmatter_tags FROM metadata_documents WHERE kind = 'webpage'"
+		).all();
+		metadata.tagTree = buildTagTree(
+			rows,
+			metadata.featureOptions?.tags?.showInlineTags !== false,
+			metadata.featureOptions?.tags?.showFrontmatterTags !== false,
+		);
+		metadata.webpages = {};
+		metadata.fileInfo = {};
+		metadata.sourceToTarget = {};
+		metadata.metadataValueToTarget = {};
+		sendJSON(response, 200, metadata);
+	} catch (error) {
+		console.error("Metadata bootstrap failed:", error);
+		sendJSON(response, 500, { error: error.message ?? "Metadata bootstrap failed." });
+	}
+}
+
+async function handleMetadataDocument(request, response) {
+	const requestURL = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
+	const exportPath = requestURL.searchParams.get("path")?.replace(/^\/+/, "");
+	if (!exportPath) {
+		sendJSON(response, 400, { error: "A metadata path is required." });
+		return;
+	}
+	const database = await getCorpusDatabase();
+	const row = database.prepare("SELECT data FROM metadata_documents WHERE export_path = ?").get(exportPath);
+	if (!row) {
+		sendJSON(response, 404, { error: "Metadata document not found." });
+		return;
+	}
+	sendJSON(response, 200, JSON.parse(row.data));
 }
 
 async function handleSearch(request, response) {
@@ -216,7 +321,7 @@ async function handleSearch(request, response) {
 		}
 
 		const matchQuery = `{${columns.join(" ")}} : (${tokenQuery})`;
-		const database = await getSearchDatabase();
+		const database = await getCorpusDatabase();
 		const candidateLimit = type === 8 ? Math.max(limit * 10, 1000) : limit;
 		let rows = database.prepare(`
 			SELECT path, source_path, title, aliases, headers, tags,
@@ -306,6 +411,24 @@ async function loadMetadata() {
 	const metadataPath = path.join(metadataRoot, "metadata.json");
 	const raw = await readFile(metadataPath, "utf8");
 	const metadata = JSON.parse(raw);
+	if (metadata.serverMetadata) {
+		const database = await getCorpusDatabase();
+		const rows = database.prepare("SELECT export_path, kind, data FROM metadata_documents").all();
+		metadata.webpages = {};
+		metadata.fileInfo = {};
+		metadata.sourceToTarget = {};
+		for (const row of rows) {
+			const data = JSON.parse(row.data);
+			metadata.sourceToTarget[data.sourcePath] = data.exportPath;
+			if (row.kind === "webpage") metadata.webpages[row.export_path] = data;
+			else metadata.fileInfo[row.export_path] = data;
+		}
+		metadata.metadataValueToTarget = {};
+		for (const row of database.prepare("SELECT value, export_path FROM metadata_redirects").all()) {
+			metadata.metadataValueToTarget[row.value] = row.export_path;
+		}
+		return metadata;
+	}
 	if (metadata.metadataShards) {
 		const resolveShard = (filename) => {
 			if (typeof filename !== "string" || !filename.endsWith(".json")) {
@@ -317,11 +440,16 @@ async function loadMetadata() {
 			}
 			return shardPath;
 		};
+		const webpageBuckets = metadata.metadataShards.webpageBuckets;
 		const [webpages, fileInfo] = await Promise.all([
-			readFile(resolveShard(metadata.metadataShards.webpages), "utf8"),
+			webpageBuckets
+				? Promise.all(webpageBuckets.map((bucket) => readFile(resolveShard(bucket), "utf8")))
+				: readFile(resolveShard(metadata.metadataShards.webpages), "utf8"),
 			readFile(resolveShard(metadata.metadataShards.fileInfo), "utf8"),
 		]);
-		metadata.webpages = JSON.parse(webpages);
+		metadata.webpages = Array.isArray(webpages)
+			? Object.assign({}, ...webpages.map((bucket) => JSON.parse(bucket)))
+			: JSON.parse(webpages);
 		metadata.fileInfo = JSON.parse(fileInfo);
 	}
 	return metadata;
@@ -881,7 +1009,7 @@ async function handleCheckout(request, response) {
 async function serveStatic(request, response) {
 	const requestURL = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
 	let pathname = decodeURIComponent(requestURL.pathname);
-	if (pathname === "/server" || pathname.startsWith("/server/")) {
+	if (pathname === "/server" || pathname.startsWith("/server/") || pathname === "/.export-timings.jsonl") {
 		send(response, 404, "Not found", { "Content-Type": "text/plain; charset=utf-8" });
 		return;
 	}
@@ -889,8 +1017,8 @@ async function serveStatic(request, response) {
 		pathname === "/.server-data" ||
 		pathname.startsWith("/.server-data/") ||
 		pathname === "/.export-progress.json" ||
-		pathname === "/site-lib/search-corpus" ||
-		pathname.startsWith("/site-lib/search-corpus/")
+		pathname === "/site-lib/corpus" ||
+		pathname.startsWith("/site-lib/corpus/")
 	) {
 		send(response, 404, "Not found", { "Content-Type": "text/plain; charset=utf-8" });
 		return;
@@ -935,8 +1063,16 @@ async function serveStatic(request, response) {
 
 async function resolveMetadataRedirect(pathname) {
 	try {
-		const metadata = await loadMetadata();
+		const bootstrap = JSON.parse(await readFile(
+			path.join(EXPORT_ROOT, "site-lib", "metadata.json"),
+			"utf8"
+		));
 		const metadataValue = normalizeMetadataValue(pathname.replace(/^\/+/, "").replace(/\.html$/i, ""));
+		if (bootstrap.serverMetadata) {
+			const database = await getCorpusDatabase();
+			return database.prepare("SELECT export_path FROM metadata_redirects WHERE value = ?").get(metadataValue)?.export_path;
+		}
+		const metadata = await loadMetadata();
 		return metadata.metadataValueToTarget?.[metadataValue];
 	} catch {
 		return undefined;
@@ -963,6 +1099,18 @@ export function createShoppingBasketServer() {
 			sendJSON(response, 200, searchStatus);
 			return;
 		}
+		if (request.method === "GET" && requestURL.pathname === "/api/metadata/status") {
+			sendJSON(response, 200, metadataStatus);
+			return;
+		}
+		if (request.method === "GET" && requestURL.pathname === "/api/metadata/bootstrap") {
+			await handleMetadataBootstrap(request, response);
+			return;
+		}
+		if (request.method === "GET" && requestURL.pathname === "/api/metadata/document") {
+			await handleMetadataDocument(request, response);
+			return;
+		}
 		if (request.method === "POST" && requestURL.pathname === "/api/search") {
 			await handleSearch(request, response);
 			return;
@@ -982,13 +1130,13 @@ export function createShoppingBasketServer() {
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-	getSearchDatabase().catch((error) => {
-		console.error("Search index initialization failed:", error);
+	getCorpusDatabase().catch((error) => {
+		console.error("Corpus index initialization failed:", error);
 	});
 	const server = createShoppingBasketServer();
 	server.listen(PORT, HOST, () => {
 		console.log(`Shopping basket server listening on http://${HOST}:${PORT}`);
 		console.log(`Serving export from ${EXPORT_ROOT}`);
-		console.log(`Reading vault from ${VAULT_ROOT}`);
+		console.log(`Vault configured for checkout from ${VAULT_ROOT}`);
 	});
 }

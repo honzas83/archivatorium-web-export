@@ -15,7 +15,7 @@ import { FileData, TagTreeItemData, WebpageData, WebsiteData } from "src/shared/
 import { Utils } from "src/plugin/utils/utils";
 import { Shared } from "src/shared/shared";
 import { WebpageTemplate } from "./webpage-template";
-import { SearchCorpus } from "./search-corpus";
+import { ServerCorpus } from "./server-corpus";
 import { mkdir, rename, writeFile } from "fs/promises";
 
 export class Index
@@ -32,7 +32,12 @@ export class Index
 	private attachmentPaths: Set<string> = new Set();
 	private oldFileData: Map<string, FileData> = new Map();
 	private oldWebpageData: Map<string, WebpageData> = new Map();
-	private searchCorpus: SearchCorpus;
+	private metadataValuesByTarget: Map<string, Set<string>> = new Map();
+	private websiteAttachmentPaths: Set<string> = new Set();
+	private webpagePathsByMetadataBucket: Map<number, Set<string>> = new Map();
+	private dirtyMetadataBuckets: Set<number> = new Set();
+	private serverCorpus: ServerCorpus;
+	private static readonly metadataBucketCount = 64;
 
 	private stopWords = ["a", "about", "actually", "almost", "also", "although", "always", "am", "an", "and", "any", "are", "as", "at", "be", "became", "become", "but", "by", "can", "could", "did", "do", "does", "each", "either", "else", "for", "from", "had", "has", "have", "hence", "how", "i", "if", "in", "is", "it", "its", "just", "may", "maybe", "me", "might", "mine", "must", "my", "mine", "must", "my", "neither", "nor", "not", "of", "oh", "ok", "when", "where", "whereas", "wherever", "whenever", "whether", "which", "while", "who", "whom", "whoever", "whose", "why", "will", "with", "within", "without", "would", "yes", "yet", "you", "your"];
 	private minisearchOptions = 
@@ -65,7 +70,14 @@ export class Index
 	{
 		this.website = website;
 		this.exportOptions = options;
-		this.searchCorpus = new SearchCorpus(this.website.destination, AssetHandler.libraryPath);
+		this.serverCorpus = new ServerCorpus(this.website.destination, AssetHandler.libraryPath);
+		if (this.usesServerMetadata())
+		{
+			this.websiteData = new WebsiteData();
+			this.websiteData.createdTime = Date.now();
+		}
+		else
+		{
 
 		try
 		{
@@ -79,11 +91,16 @@ export class Index
 				if (parsedWebsiteData.metadataShards)
 				{
 					const libraryPath = this.website.destination.join(AssetHandler.libraryPath);
+					const webpageBuckets = parsedWebsiteData.metadataShards.webpageBuckets;
 					const [webpages, fileInfo] = await Promise.all([
-						libraryPath.joinString(parsedWebsiteData.metadataShards.webpages).readAsString(),
-						libraryPath.joinString(parsedWebsiteData.metadataShards.fileInfo).readAsString(),
+						webpageBuckets
+							? Promise.all(webpageBuckets.map((bucket) => libraryPath.joinString(bucket).readAsString()))
+							: libraryPath.joinString(parsedWebsiteData.metadataShards.webpages ?? Shared.metadataPagesFileName).readAsString(),
+						libraryPath.joinString(parsedWebsiteData.metadataShards.fileInfo ?? Shared.metadataFilesFileName).readAsString(),
 					]);
-					parsedWebsiteData.webpages = webpages ? JSON.parse(webpages) : {};
+					parsedWebsiteData.webpages = Array.isArray(webpages)
+						? Object.assign({}, ...webpages.filter((bucket): bucket is string => !!bucket).map((bucket) => JSON.parse(bucket)))
+						: webpages ? JSON.parse(webpages) : {};
 					parsedWebsiteData.fileInfo = fileInfo ? JSON.parse(fileInfo) : {};
 				}
 				this.oldWebsiteData = parsedWebsiteData;
@@ -112,6 +129,26 @@ export class Index
 			if (!this.websiteData.fileInfo) this.websiteData.fileInfo = {};
 			if (!this.websiteData.sourceToTarget) this.websiteData.sourceToTarget = {};
 			if (!this.websiteData.metadataValueToTarget) this.websiteData.metadataValueToTarget = {};
+			this.rebuildMetadataBuckets();
+			if (!this.websiteData.metadataShards?.webpageBuckets)
+			{
+				for (const bucket of this.webpagePathsByMetadataBucket.keys())
+				{
+					this.dirtyMetadataBuckets.add(bucket);
+				}
+			}
+			this.websiteAttachmentPaths = new Set(this.websiteData.attachments);
+			this.metadataValuesByTarget.clear();
+			for (const [metadataValue, targetPath] of Object.entries(this.websiteData.metadataValueToTarget))
+			{
+				let values = this.metadataValuesByTarget.get(targetPath);
+				if (!values)
+				{
+					values = new Set();
+					this.metadataValuesByTarget.set(targetPath, values);
+				}
+				values.add(metadataValue);
+			}
 			this.websiteData.featureOptions = 
 			{
 				backlinks: options.backlinkOptions,
@@ -146,6 +183,40 @@ export class Index
 		{
 			ExportLog.warning(e, "Failed to load metadata.json. Recreating metadata.");
 		}
+		}
+
+		// Server metadata exports intentionally do not load prior page records.
+		// The companion server owns those records after importing the disk journal.
+		if (this.usesServerMetadata())
+		{
+			this.websiteData.featureOptions = {
+				backlinks: options.backlinkOptions,
+				tags: options.tagOptions,
+				alias: options.aliasOptions,
+				properties: options.propertiesOptions,
+				fileNavigation: options.fileNavigationOptions,
+				search: options.searchOptions,
+				shoppingBasket: options.shoppingBasketOptions,
+				outline: options.outlineOptions,
+				themeToggle: options.themeToggleOptions,
+				graphView: options.graphViewOptions,
+				sidebar: options.sidebarOptions,
+				customHead: options.customHeadOptions,
+				document: options.documentOptions,
+				rss: options.rssOptions,
+				linkPreview: options.linkPreviewOptions,
+			};
+			this.websiteData.modifiedTime = Date.now();
+			this.websiteData.siteName = this.website.exportOptions.siteName ?? "";
+			this.websiteData.vaultName = app.vault.getName();
+			this.websiteData.exportRoot = this.website.exportOptions.exportRoot ?? "";
+			this.websiteData.baseURL = this.website.exportOptions.rssOptions.siteUrl ?? "";
+			this.websiteData.pluginVersion = HTMLExportPlugin.pluginVersion;
+			this.websiteData.themeName = this.website.exportOptions.themeName ?? "Default";
+			this.websiteData.bodyClasses = await WebpageTemplate.getValidBodyClasses() ?? "";
+			this.websiteData.hasFavicon = this.exportOptions.faviconPath != "";
+			this.websiteData.serverMetadata = true;
+		}
 
 		if (this.exportOptions.searchOptions.serverSide)
 		{
@@ -173,8 +244,22 @@ export class Index
 		this.rssURL = AssetHandler.generateSavePath("rss.xml", AssetType.Other, new Path(this.exportOptions.rssOptions.siteUrl ?? "")).absolute();
 	}
 
+	private usesServerMetadata(): boolean
+	{
+		return this.exportOptions.searchOptions.serverSide && !this.exportOptions.combineAsSingleFile;
+	}
+
 	public async finalize()
 	{
+		if (this.usesServerMetadata())
+		{
+			for (const file of this.deletedFiles)
+			{
+				await this.serverCorpus.remove(file);
+			}
+			return;
+		}
+
 		this.sortFiles();
 		if (this.exportOptions.searchOptions.serverSide)
 		{
@@ -189,9 +274,10 @@ export class Index
 		{
 			delete this.websiteData.fileInfo[file];
 			delete this.websiteData.webpages[file];
+			this.markMetadataBucketDirty(file);
 			if (this.exportOptions.searchOptions.serverSide && file.toLowerCase().endsWith(".html"))
 			{
-				await this.searchCorpus.remove(file);
+				await this.serverCorpus.remove(file);
 			}
 		}
 		this.websiteData.attachments = this.websiteData.attachments.filter((file) => !this.deletedFiles.has(file));
@@ -238,17 +324,45 @@ export class Index
 	public async saveWebsiteData(): Promise<void>
 	{
 		const websiteDataPath = AssetHandler.generateSavePath("metadata.json", AssetType.Other, this.website.destination);
+		if (this.usesServerMetadata())
+		{
+			const { webpages, fileInfo, sourceToTarget, metadataValueToTarget, attachments, shownInTree, allFiles, tagTree, ...bootstrap } = this.websiteData;
+			await this.writeAtomically(
+				websiteDataPath,
+				JSON.stringify(bootstrap, Index.compactMetadataReplacer)
+			);
+			return;
+		}
+
 		if (!this.exportOptions.combineAsSingleFile)
 		{
-			const webpagesPath = AssetHandler.generateSavePath(Shared.metadataPagesFileName, AssetType.Other, this.website.destination);
 			const fileInfoPath = AssetHandler.generateSavePath(Shared.metadataFilesFileName, AssetType.Other, this.website.destination);
 			const { webpages, fileInfo, ...coreData } = this.websiteData;
+			const webpageBuckets = Array.from({ length: Index.metadataBucketCount }, (_, bucket) =>
+				`${Shared.metadataPagesDirectoryName}/${bucket.toString().padStart(2, "0")}.json`
+			);
 			coreData.metadataShards = {
-				webpages: Shared.metadataPagesFileName,
+				webpageBuckets,
 				fileInfo: Shared.metadataFilesFileName,
 			};
+			const dirtyBuckets = this.dirtyMetadataBuckets.size > 0
+				? Array.from(this.dirtyMetadataBuckets)
+				: [];
+			await Promise.all(dirtyBuckets.map(async (bucket) =>
+			{
+				const bucketData: {[targetPath: string]: WebpageData} = {};
+				for (const targetPath of this.webpagePathsByMetadataBucket.get(bucket) ?? [])
+				{
+					const data = webpages[targetPath];
+					if (data) bucketData[targetPath] = data;
+				}
+				await this.writeAtomically(
+					AssetHandler.generateSavePath(webpageBuckets[bucket], AssetType.Other, this.website.destination),
+					JSON.stringify(bucketData, Index.compactMetadataReplacer)
+				);
+			}));
+			this.dirtyMetadataBuckets.clear();
 			await Promise.all([
-				this.writeAtomically(webpagesPath, JSON.stringify(webpages, Index.compactMetadataReplacer)),
 				this.writeAtomically(fileInfoPath, JSON.stringify(fileInfo, Index.compactMetadataReplacer)),
 			]);
 			await this.writeAtomically(
@@ -278,6 +392,47 @@ export class Index
 		await mkdir(targetPath.absoluted().directory.pathname, { recursive: true });
 		await writeFile(temporaryPath, data);
 		await rename(temporaryPath, absolutePath);
+	}
+
+	private getMetadataBucket(targetPath: string): number
+	{
+		let hash = 2166136261;
+		for (let index = 0; index < targetPath.length; index++)
+		{
+			hash ^= targetPath.charCodeAt(index);
+			hash = Math.imul(hash, 16777619);
+		}
+		return (hash >>> 0) % Index.metadataBucketCount;
+	}
+
+	private rebuildMetadataBuckets(): void
+	{
+		this.webpagePathsByMetadataBucket.clear();
+		for (const targetPath of Object.keys(this.websiteData.webpages))
+		{
+			const bucket = this.getMetadataBucket(targetPath);
+			let paths = this.webpagePathsByMetadataBucket.get(bucket);
+			if (!paths)
+			{
+				paths = new Set();
+				this.webpagePathsByMetadataBucket.set(bucket, paths);
+			}
+			paths.add(targetPath);
+		}
+	}
+
+	private markMetadataBucketDirty(targetPath: string): void
+	{
+		const bucket = this.getMetadataBucket(targetPath);
+		let paths = this.webpagePathsByMetadataBucket.get(bucket);
+		if (!paths)
+		{
+			paths = new Set();
+			this.webpagePathsByMetadataBucket.set(bucket, paths);
+		}
+		if (this.websiteData.webpages[targetPath]) paths.add(targetPath);
+		else paths.delete(targetPath);
+		this.dirtyMetadataBuckets.add(bucket);
 	}
 
 	private buildTagTree(): TagTreeItemData[]
@@ -401,7 +556,10 @@ export class Index
 			const guid = page.source.path;
 			const outputData = page.generatedOutputData;
 			const storedData = this.websiteData.webpages[page.targetPath.path];
-			const date = outputData?.rssDate ?? new Date(page.source.stat.mtime);
+			const date =
+				outputData?.rssDate ??
+				storedData?.rssDate ??
+				new Date(page.source.stat.mtime);
 			author = outputData?.author ?? storedData?.author ?? author;
 			const media = outputData?.coverImageURL ?? storedData?.coverImageURL ?? "";
 			const hasMedia = media != "";
@@ -436,8 +594,16 @@ export class Index
 			let newItems = Array.from(rssDocNew.querySelectorAll("item"));
 
 			// filter out deleted files and remove duplicated items favoring the new rss
-			oldItems = oldItems.filter((oldItem) => !this.deletedFiles.has(oldItem.querySelector("guid")?.textContent ?? ""));
-			oldItems = oldItems.filter((oldItem) => !newItems.some((newItem) => newItem.querySelector("guid")?.textContent == oldItem.querySelector("guid")?.textContent));
+			const newItemGuids = new Set(
+				newItems.map((newItem) =>
+					newItem.querySelector("guid")?.textContent ?? ""
+				)
+			);
+			oldItems = oldItems.filter((oldItem) =>
+			{
+				const guid = oldItem.querySelector("guid")?.textContent ?? "";
+				return !this.deletedFiles.has(guid) && !newItemGuids.has(guid);
+			});
 			
 			// remove all items from new rss
 			newItems.forEach((item) => item.remove());
@@ -541,7 +707,7 @@ export class Index
 			}
 			else
 			{
-				this.updateAttachment(file);
+				await this.updateAttachment(file);
 			}
 		}
 	}
@@ -558,11 +724,11 @@ export class Index
 	{
 		if (file instanceof Webpage)
 		{
-			this.removeWebpage(file);
+			await this.removeWebpage(file);
 		}
 		else
 		{
-			this.removeAttachment(file);
+			await this.removeAttachment(file);
 		}
 	}
 
@@ -622,8 +788,6 @@ export class Index
 
 	public async applyToOldWebpages(callback: (document: Document, oldData: WebpageData) => Promise<any>)
 	{
-		const promises: Promise<any>[] = [];
-
 		if (this.oldWebsiteData)
 		{
 			const webpages = Array.from(this.oldWebpageData.entries());
@@ -638,15 +802,13 @@ export class Index
 				{
 					const document = new DOMParser().parseFromString(fileData.toString(), "text/html");
 					await callback(document, data);
-					promises.push(filePath.write(`<!DOCTYPE html>\n${document.documentElement.outerHTML}`));
+					await filePath.write(`<!DOCTYPE html>\n${document.documentElement.outerHTML}`);
 				}
 			}
 		}
-
-		Promise.all(promises);
 	}
 
-	private async addWebpageToWebsiteData(webpage: Webpage)
+	private async addWebpageToWebsiteData(webpage: Webpage): Promise<WebpageData | undefined>
 	{
 		if (webpage.sourcePath && this.websiteData)
 		{
@@ -657,13 +819,17 @@ export class Index
 			webpageInfo.aliases = webpage.outputData.aliases;
 			webpageInfo.inlineTags = webpage.outputData.inlineTags;
 			webpageInfo.frontmatterTags = webpage.outputData.frontmatterTags;
-			webpageInfo.headers = await webpage.outputData.renderedHeadings;
-			webpageInfo.links = webpage.outputData.linksToOtherFiles;
+			webpageInfo.rssDate = webpage.outputData.rssDate;
+			const compactLargeVaultMetadata =
+				this.exportOptions.searchOptions.serverSide &&
+				!this.exportOptions.graphViewOptions.enabled;
+			webpageInfo.headers = compactLargeVaultMetadata ? [] : await webpage.outputData.renderedHeadings;
+			webpageInfo.links = compactLargeVaultMetadata ? [] : webpage.outputData.linksToOtherFiles;
 			webpageInfo.author = webpage.outputData.author;
 			webpageInfo.coverImageURL = webpage.outputData.coverImageURL;
 			webpageInfo.fullURL = webpage.outputData.fullURL;
 			webpageInfo.pathToRoot = webpage.outputData.pathToRoot == "" ? "." : webpage.outputData.pathToRoot;
-			webpageInfo.attachments = webpage.attachments.map((download) => download.targetPath.path);
+			webpageInfo.attachments = compactLargeVaultMetadata ? [] : webpage.attachments.map((download) => download.targetPath.path);
 			
 			webpageInfo.createdTime = webpage.source.stat.ctime;
 			webpageInfo.modifiedTime = webpage.source.stat.mtime;
@@ -677,6 +843,10 @@ export class Index
 			if (this.exportOptions.combineAsSingleFile)
 			{
 				webpageInfo.data = webpage.data.toString();
+			}
+			if (this.usesServerMetadata())
+			{
+				return webpageInfo;
 			}
 
 			// get file info version of the webpage
@@ -694,19 +864,40 @@ export class Index
 			
 
 			this.websiteData.webpages[webpageInfo.exportPath] = webpageInfo;
+			this.markMetadataBucketDirty(webpageInfo.exportPath);
 			if (!this.websiteData.metadataValueToTarget) this.websiteData.metadataValueToTarget = {};
-			for (const [metadataValue, targetPath] of Object.entries(this.websiteData.metadataValueToTarget))
+			const previousMetadataValues =
+				this.metadataValuesByTarget.get(webpageInfo.exportPath);
+			if (previousMetadataValues)
 			{
-				if (targetPath === webpageInfo.exportPath)
+				for (const metadataValue of previousMetadataValues)
 				{
-					delete this.websiteData.metadataValueToTarget[metadataValue];
+					if (
+						this.websiteData.metadataValueToTarget[metadataValue] ===
+						webpageInfo.exportPath
+					)
+					{
+						delete this.websiteData.metadataValueToTarget[metadataValue];
+					}
 				}
+				this.metadataValuesByTarget.delete(webpageInfo.exportPath);
 			}
 			for (const metadataValue of webpage.outputData.metadataRedirectValues)
 			{
 				if (!this.websiteData.metadataValueToTarget[metadataValue])
 				{
 					this.websiteData.metadataValueToTarget[metadataValue] = webpageInfo.exportPath;
+					let values =
+						this.metadataValuesByTarget.get(webpageInfo.exportPath);
+					if (!values)
+					{
+						values = new Set();
+						this.metadataValuesByTarget.set(
+							webpageInfo.exportPath,
+							values
+						);
+					}
+					values.add(metadataValue);
 				}
 			}
 			if (this.exportOptions.combineAsSingleFile)
@@ -721,7 +912,7 @@ export class Index
 		}
 	}
 
-	private async addWebpageToMinisearch(webpage: Webpage)
+	private async addWebpageToMinisearch(webpage: Webpage, webpageInfo?: WebpageData)
 	{
 		const headersInfo = [...await webpage.outputData.renderedHeadings];
 		if (headersInfo.length > 0 && headersInfo[0].level == 1 && headersInfo[0].heading == webpage.title) headersInfo.shift();
@@ -730,15 +921,17 @@ export class Index
 
 		if (this.exportOptions.searchOptions.serverSide)
 		{
-			await this.searchCorpus.write({
-				path: webpage.targetPath.path,
-				sourcePath: webpage.sourcePath ?? "",
-				title: webpage.title,
-				metadata: webpage.outputData.metadataSearchText,
-				aliases: webpage.outputData.aliases,
-				headers,
-				tags: webpage.outputData.allTags,
-				content,
+			if (!webpageInfo) throw new Error(`Missing metadata for ${webpage.targetPath.path}`);
+			await this.serverCorpus.write({
+				kind: "webpage",
+				data: webpageInfo,
+				redirectValues: webpage.outputData.metadataRedirectValues,
+				search: {
+					metadata: webpage.outputData.metadataSearchText,
+					headers,
+					tags: webpage.outputData.allTags,
+					content,
+				},
 			});
 			return;
 		}
@@ -765,11 +958,27 @@ export class Index
 
 	private async updateWebpage(webpage: Webpage)
 	{
-		await this.addWebpageToWebsiteData(webpage);
-		await this.addWebpageToMinisearch(webpage);
+		const webpageInfo = await this.addWebpageToWebsiteData(webpage);
+		await this.addWebpageToMinisearch(webpage, webpageInfo);
 	}
 
-	private addAttachmentToWebsiteData(attachment: Attachment): string
+	public async recordGeneratedWebpage(webpage: Webpage): Promise<void>
+	{
+		await this.updateWebpage(webpage);
+	}
+
+	public async isGeneratedWebpageCurrent(webpage: Webpage): Promise<boolean>
+	{
+		if (!this.usesServerMetadata()) return false;
+		if (!webpage.targetPath.absoluted().exists) return false;
+		return await this.serverCorpus.isCurrent(
+			webpage.targetPath.path,
+			webpage.source.stat.mtime,
+			webpage.source.stat.size
+		);
+	}
+
+	private async addAttachmentToWebsiteData(attachment: Attachment): Promise<string>
 	{
 		const exportPath = attachment.targetPath.path;
 		const key = exportPath;
@@ -792,18 +1001,27 @@ export class Index
 				if (attachment.data instanceof Buffer) fileInfo.data = attachment.data.toString("base64");
 				else fileInfo.data = attachment.data.toString();
 			}
+			if (this.usesServerMetadata())
+			{
+				await this.serverCorpus.write({ kind: "file", data: fileInfo });
+				return key;
+			}
 
 			this.websiteData.fileInfo[key] = fileInfo;
-			if (!this.websiteData.attachments.includes(key)) this.websiteData.attachments.push(key);
+			if (!this.websiteAttachmentPaths.has(key))
+			{
+				this.websiteAttachmentPaths.add(key);
+				this.websiteData.attachments.push(key);
+			}
 			this.websiteData.sourceToTarget[fileInfo.sourcePath] = fileInfo.exportPath;
 		}
 
 		return key;
 	}
 
-	private updateAttachment(attachment: Attachment)
+	private async updateAttachment(attachment: Attachment)
 	{
-		this.addAttachmentToWebsiteData(attachment);
+		await this.addAttachmentToWebsiteData(attachment);
 
 		const path = attachment.targetPath.path;
 		if (!this.attachmentPaths.has(path))
@@ -829,7 +1047,7 @@ export class Index
 		this.webpages.sort((a, b) => b.source.stat.mtime - a.source.stat.mtime);
 	}
 
-	private removeWebpage(webpage: Webpage)
+	private async removeWebpage(webpage: Webpage)
 	{
 		if (webpage.sourcePath && this.sourceToWebpage.has(webpage.sourcePath))
 		{
@@ -837,7 +1055,13 @@ export class Index
 		}
 
 		const key = webpage.targetPath.path;
+		if (this.usesServerMetadata())
+		{
+			await this.serverCorpus.remove(key);
+			return;
+		}
 		delete this.websiteData.webpages[key];
+		this.markMetadataBucketDirty(key);
 		delete this.websiteData.fileInfo[key];
 
 		if (this.minisearch)
@@ -849,7 +1073,7 @@ export class Index
 		}
 	}
 
-	private removeAttachment(attachment: Attachment)
+	private async removeAttachment(attachment: Attachment)
 	{
 		if (attachment.sourcePath && this.sourceToAttachment.has(attachment.sourcePath))
 		{
@@ -857,6 +1081,11 @@ export class Index
 		}
 
 		const key = attachment.targetPath.path;
+		if (this.usesServerMetadata())
+		{
+			await this.serverCorpus.remove(key);
+			return;
+		}
 		delete this.websiteData.fileInfo[key];
 	}
 

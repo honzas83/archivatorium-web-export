@@ -9,6 +9,7 @@ import { Webpage } from "./website/webpage";
 
 export class HTMLExporter
 {
+	public static lastExportSucceeded: boolean = false;
 	static async updateSettings(usePreviousSettings: boolean = false, overrideFiles: TFile[] | undefined = undefined, overrideExportPath: Path | undefined = undefined): Promise<ExportInfo | undefined>
 	{
 		if (!usePreviousSettings) 
@@ -49,6 +50,7 @@ export class HTMLExporter
 
 	public static async exportFiles(files: TFile[], destination: Path, saveFiles: boolean, deleteOld: boolean) : Promise<Website | undefined>
 	{
+		HTMLExporter.lastExportSucceeded = false;
 		MarkdownRendererAPI.beginBatch();
 		let website = undefined;
 		try
@@ -122,9 +124,12 @@ export class HTMLExporter
 			{
 				ExportLog.setRemainingWorkItems(0);
 			}
+
+			HTMLExporter.lastExportSucceeded = true;
 		}
 		catch (e)
 		{
+			HTMLExporter.lastExportSucceeded = false;
 			new Notice("❌ Export Failed: " + e, 5000);
 			ExportLog.error(e, "Export Failed", true);
 		}

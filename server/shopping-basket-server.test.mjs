@@ -5,38 +5,51 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-test("server indexes search corpus and keeps it private", async () => {
+test("server indexes the unified corpus and keeps it private", async () => {
 	const testRoot = await mkdtemp(path.join(tmpdir(), "obsidian-export-search-"));
 	const exportRoot = path.join(testRoot, "export");
 	const vaultRoot = path.join(testRoot, "vault");
-	const corpusRoot = path.join(exportRoot, "site-lib", "search-corpus");
+	const corpusRoot = path.join(exportRoot, "site-lib", "corpus");
 	await mkdir(corpusRoot, { recursive: true });
 	await mkdir(vaultRoot, { recursive: true });
 	await writeFile(path.join(exportRoot, "index.html"), "<!doctype html><title>Test</title>");
 	await writeFile(path.join(exportRoot, "site-lib", "metadata.json"), JSON.stringify({
-		metadataValueToTarget: { example2026: "folder/document.html" },
-		metadataShards: {
-			webpages: "metadata-pages.json",
-			fileInfo: "metadata-files.json",
-		},
+		serverMetadata: true,
 	}));
-	await writeFile(path.join(exportRoot, "site-lib", "metadata-pages.json"), JSON.stringify({
-		"folder/document.html": {
+	await writeFile(path.join(corpusRoot, "document.json"), JSON.stringify({
+		kind: "webpage",
+		data: {
+			createdTime: 0,
+			modifiedTime: 0,
+			sourceSize: 0,
 			sourcePath: "Folder/Document.md",
 			exportPath: "folder/document.html",
+			showInTree: true,
+			treeOrder: 0,
+			backlinks: [],
+			type: "markdown",
+			data: null,
 			title: "Document title",
+			aliases: ["Example alias"],
+			inlineTags: ["Topic/Child"],
+			frontmatterTags: [],
+			headers: [],
+			links: [],
+			attachments: [],
+			pathToRoot: ".",
+			icon: "",
+			description: "",
+			author: "",
+			coverImageURL: "",
+			fullURL: "",
 		},
-	}));
-	await writeFile(path.join(exportRoot, "site-lib", "metadata-files.json"), "{}");
-	await writeFile(path.join(corpusRoot, "document.json"), JSON.stringify({
-		path: "folder/document.html",
-		sourcePath: "Folder/Document.md",
-		title: "Document title",
-		metadata: "citekey example2026",
-		aliases: ["Example alias"],
-		headers: ["Relevant heading"],
-		tags: ["Topic/Child"],
-		content: "Complete searchable text remains available.",
+		redirectValues: ["example2026"],
+		search: {
+			metadata: "citekey example2026",
+			headers: ["Relevant heading"],
+			tags: ["Topic/Child"],
+			content: "Complete searchable text remains available.",
+		},
 	}));
 
 	process.env.EXPORT_ROOT = exportRoot;
@@ -87,7 +100,7 @@ test("server indexes search corpus and keeps it private", async () => {
 		assert.equal(redirectResponse.headers.get("location"), "/folder/document.html");
 
 		const privateCorpusResponse = await fetch(
-			`${baseURL}/site-lib/search-corpus/document.json`
+			`${baseURL}/site-lib/corpus/document.json`
 		);
 		assert.equal(privateCorpusResponse.status, 404);
 	} finally {

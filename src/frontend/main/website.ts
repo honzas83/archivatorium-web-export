@@ -315,8 +315,8 @@ export class ObsidianWebsite {
 			return this.document;
 		}
 
-		const data = ObsidianSite.getWebpageData(url) as WebpageData;
-		if (!data) {
+		const data = await ObsidianSite.getWebpageDataAsync(url);
+		if (!data && !this.metadata.serverMetadata) {
 			new Notice("This page does not exist yet.");
 			console.warn("Page does not exist", url);
 			return undefined;
@@ -406,6 +406,7 @@ export class ObsidianWebsite {
 	public documentExists(url: string): boolean {
 		url = LinkHandler.getPathnameFromURL(url);
 		if (this.isHttp) {
+			if (this.metadata?.serverMetadata) return true;
 			return !!this.resolveWebpagePath(url);
 		} else {
 			return !!this.getFileData(url)?.data;
@@ -414,6 +415,7 @@ export class ObsidianWebsite {
 
 	private resolveWebpagePath(url: string): string | undefined {
 		const cleanURL = LinkHandler.getPathnameFromURL(url).replace(/^\/+/, "");
+		if (this.metadata?.serverMetadata) return cleanURL || "index.html";
 		if (!cleanURL) return this.metadata?.webpages["index.html"] ? "index.html" : undefined;
 		if (this.metadata?.webpages[cleanURL]) return cleanURL;
 
@@ -435,17 +437,26 @@ export class ObsidianWebsite {
 				if (dataReq.ok) {
 					const jsonStr = await dataReq.text();
 					const data = WebsiteData.fromJSON(jsonStr);
+					if (data.serverMetadata) {
+						const bootstrapReq = await fetch("/api/metadata/bootstrap");
+						if (!bootstrapReq.ok) throw new Error("Failed to load server metadata bootstrap.");
+						return WebsiteData.fromJSON(JSON.stringify(await bootstrapReq.json()));
+					}
 					if (data.metadataShards)
 					{
+						const webpageBucketPaths = data.metadataShards.webpageBuckets;
 						const [webpagesReq, fileInfoReq] = await Promise.all([
-							fetch(`${Shared.libFolderName}/${data.metadataShards.webpages}`),
+							webpageBucketPaths
+								? Promise.all(webpageBucketPaths.map((path) => fetch(`${Shared.libFolderName}/${path}`)))
+								: fetch(`${Shared.libFolderName}/${data.metadataShards.webpages ?? Shared.metadataPagesFileName}`),
 							fetch(`${Shared.libFolderName}/${data.metadataShards.fileInfo}`),
 						]);
-						if (!webpagesReq.ok || !fileInfoReq.ok)
+						const webpageResponses = Array.isArray(webpagesReq) ? webpagesReq : [webpagesReq];
+						if (webpageResponses.some((response) => !response.ok) || !fileInfoReq.ok)
 						{
 							throw new Error("Failed to load website metadata shards.");
 						}
-						data.webpages = await webpagesReq.json();
+						data.webpages = Object.assign({}, ...(await Promise.all(webpageResponses.map((response) => response.json()))));
 						data.fileInfo = await fileInfoReq.json();
 					}
 					return data;
@@ -506,6 +517,22 @@ export class ObsidianWebsite {
 	}
 
 	private cachedWebpageDataMap: Map<string, WebpageData> = new Map();
+	public async getWebpageDataAsync(url: string): Promise<WebpageData | undefined> {
+		const cached = this.getWebpageData(url);
+		if (cached || !this.isHttp || !this.metadata?.serverMetadata) return cached;
+		try {
+			const pathname = LinkHandler.getPathnameFromURL(url).replace(/^\/+/, "");
+			const response = await fetch(`/api/metadata/document?path=${encodeURIComponent(pathname)}`);
+			if (!response.ok) return undefined;
+			const data = await response.json() as WebpageData;
+			this.cachedWebpageDataMap.set(pathname, data);
+			return data;
+		} catch (error) {
+			console.error("Failed to load webpage metadata", error);
+			return undefined;
+		}
+	}
+
 	public getWebpageData(url: string): WebpageData | undefined {
 		if (!this.isHttp) {
 			if (this.cachedWebpageDataMap.has(url)) {
@@ -520,6 +547,8 @@ export class ObsidianWebsite {
 		}
 
 		if (this.metadata) {
+			const cached = this.cachedWebpageDataMap.get(url);
+			if (cached) return cached;
 			const data = this.metadata.webpages[url];
 			if (data) {
 				return data;

@@ -150,16 +150,31 @@ The runner refreshes `main.js`, `manifest.json`, and `styles.css` inside
 `.obsidian/plugins/archivatorium-web-export/` for every run. The vault must be
 writable because Obsidian and the plugin update files under `.obsidian`.
 
-Reuse the same output directory for later incremental exports. Stop a running
-export with `Ctrl+C`. The first image build downloads its dependencies and the
-pinned Obsidian release; subsequent builds use Docker's cache.
+Reuse the same output directory for later incremental exports. The Docker
+runner retries an Electron `Renderer process killed` crash indefinitely;
+completed pages are reused on the next attempt. Set
+`EXPORT_RENDERER_RETRY_DELAY_SECONDS` to adjust the default 20-second wait
+between attempts. Each retry also terminates orphaned Obsidian processes and
+releases its remote-debugging port before starting again. Stop a running export
+with `Ctrl+C`. The first image build downloads its dependencies and the pinned
+Obsidian release; subsequent builds use Docker's cache.
+
+The runner also restarts Electron when the injected script has not recorded its
+initial `running` status within 90 seconds. Set
+`EXPORT_STARTUP_TIMEOUT_SECONDS` to change that startup-only watchdog.
+It always starts the pinned Obsidian version bundled in the image and removes
+any auto-updater ASAR downloaded by a previous attempt. The runner also emits
+`[docker-progress]` lines from output state files, independently of Electron's
+console-log forwarding. Once page output begins, it forwards every completed
+file name from `.export-files.log` to the console.
 
 ## Companion server
 
-Hosted exports can use the generated `server/shopping-basket-server.mjs` for
-static file serving, complete server-side search, and shopping-basket checkout.
-The server is copied into every generated website so the deployed server and
-export remain compatible.
+Hosted exports use the generated `server/shopping-basket-server.mjs` as their
+web server. It serves generated HTML, PDFs, assets, full-text search, metadata,
+redirects, and shopping-basket checkout from one process. The server is copied
+into every generated website so the deployed server and export remain
+compatible.
 
 Run it with Node.js 24:
 

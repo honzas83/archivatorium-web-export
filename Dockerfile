@@ -31,6 +31,8 @@ ENV TZ=Etc/UTC
 RUN apt update \
   && apt install -y \
     curl \
+    procps \
+    psmisc \
     xvfb \
     libasound2 \
     # From `dpkg -I obsidian.deb`
@@ -56,7 +58,7 @@ COPY --from=injector \
   /usr/local/bin/
 
 # And obsidian itself (late to leverage caching)
-ARG OBSIDIAN_VERSION=1.9.12
+ARG OBSIDIAN_VERSION=1.13.4
 ARG TARGETARCH
 RUN mkdir -p /opt/obsidian \
   && curl -L "https://github.com/obsidianmd/obsidian-releases/releases/download/v${OBSIDIAN_VERSION}/obsidian-${OBSIDIAN_VERSION}$([ "${TARGETARCH}" = "arm64" ] && echo "-arm64" || echo "").tar.gz" \

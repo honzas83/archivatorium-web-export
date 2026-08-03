@@ -76,6 +76,14 @@ export class WebpageDocument {
 
 		// load webpage data
 		this.info = ObsidianSite.getWebpageData(this.pathname) as WebpageData;
+		if (!this.info && ObsidianSite.metadata.serverMetadata) {
+			this.info = {
+				exportPath: this.pathname,
+				sourcePath: "",
+				title: this.pathname,
+				type: DocumentType.Markdown,
+			} as WebpageData;
+		}
 		if (!this.info && !ObsidianSite.metadata.ignoreMetadata) {
 			new Notice("This page does not exist yet.");
 			console.warn("This page does not exist yet.", this.pathname);
@@ -138,6 +146,14 @@ export class WebpageDocument {
 		this.isPreview = isPreview;
 
 		if (!this.pathname || !this.exists) return this;
+		if (ObsidianSite.metadata.serverMetadata) {
+			const metadata = await ObsidianSite.getWebpageDataAsync(this.pathname);
+			if (metadata) {
+				this.info = metadata;
+				this.documentType = metadata.type as DocumentType;
+				this.title = metadata.title ?? this.pathname;
+			}
+		}
 
 		let oldDocument = ObsidianSite.document;
 		await ObsidianSite.showLoading(true, containerEl);

@@ -129,6 +129,11 @@ export namespace _MarkdownRendererInternal {
 
 	export const batchDocument = document.implementation.createHTMLDocument();
 	let markdownView: MarkdownView | undefined;
+	let rendererNeedsReset = false;
+	let rendererResetReason = "";
+	let renderFailureReported = false;
+	let renderGeneration = 0;
+	export let lastRenderResetMs = 0;
 
 	const infoColor = "var(--text-normal)";
 	const warningColor = "var(--color-yellow)";
@@ -175,7 +180,12 @@ export namespace _MarkdownRendererInternal {
 	function failRender(file: TFile | undefined, message: any): undefined {
 		if (checkCancelled()) return undefined;
 
-		ExportLog.error(message, `Rendering ${file?.path ?? " custom markdown "} failed: `);
+		rendererNeedsReset = true;
+		rendererResetReason = `rendering failed for ${file?.name ?? "custom markdown"}`;
+		if (!renderFailureReported) {
+			renderFailureReported = true;
+			ExportLog.error(message, `Rendering ${file?.path ?? " custom markdown "} failed: `);
+		}
 		return;
 	}
 
@@ -184,6 +194,37 @@ export namespace _MarkdownRendererInternal {
 			`${reason} Using the fallback renderer only for ${file.name}.`,
 			"Switching renderer"
 		);
+	}
+
+	async function resetRenderView(reason: string): Promise<void> {
+		if (!renderLeaf || checkCancelled()) return;
+
+		try {
+			const resetStart = performance.now();
+			await renderLeaf.setViewState({ type: "empty", state: {} });
+			lastRenderResetMs = performance.now() - resetStart;
+			markdownView = undefined;
+			ExportLog.log(
+				`Recreated the hidden render view after ${reason}.`,
+				"Resetting renderer"
+			);
+		}
+		catch (error) {
+			lastRenderResetMs = 0;
+			ExportLog.warning(error, "Failed to reset the hidden render view.");
+		}
+	}
+
+	export function invalidateCurrentRender(reason: string): void {
+		renderGeneration++;
+		rendererNeedsReset = true;
+		rendererResetReason = reason;
+	}
+
+	export async function resetForNextDocument(reason: string = "document boundary"): Promise<void> {
+		rendererNeedsReset = false;
+		rendererResetReason = "";
+		await resetRenderView(reason);
 	}
 
 	function countEmptySemanticSections(container: HTMLElement): number {
@@ -243,6 +284,9 @@ export namespace _MarkdownRendererInternal {
 				const message = error instanceof Error ? error.message : String(error);
 				const context = file?.path ?? "custom markdown";
 				if (error instanceof RangeError && message.includes("Maximum call stack size exceeded")) {
+					rendererNeedsReset = true;
+					rendererResetReason =
+						`renderer stack overflow in ${file?.name ?? "custom markdown"}`;
 					ExportLog.warning(
 						`Renderer could not ${operation.name} in ${context}: ${message}. Continuing with the sections already available.`
 					);
@@ -258,7 +302,13 @@ export namespace _MarkdownRendererInternal {
 		if (MarkdownRendererAPI.viewableMediaExtensions.contains(file.extension)) {
 			return { contentEl: await createMediaPage(file, options), viewType: "attachment" };
 		}
+		renderFailureReported = false;
+		// Do not use ObsidianRenderer.render() directly for large notes. Some
+		// Electron/Obsidian combinations terminate the renderer process inside that
+		// API before JavaScript can report an error. The hidden preview path below
+		// is slower, but is recoverable through the existing fallback and watchdog.
 
+		const generation = renderGeneration;
 		const loneFile = !batchStarted;
 		if (loneFile) {
 			ExportLog.log("Exporting single file, starting batch");
@@ -267,6 +317,16 @@ export namespace _MarkdownRendererInternal {
 
 		const success = await waitUntil(() => renderLeaf != undefined || checkCancelled(), 2000, 1);
 		if (!success || !renderLeaf) return failRender(file, "Failed to get leaf for rendering!");
+
+		if (rendererNeedsReset)
+		{
+			const reason = rendererResetReason;
+			rendererNeedsReset = false;
+			rendererResetReason = "";
+			await resetRenderView(reason);
+			if (checkCancelled() || !renderLeaf) return undefined;
+		}
+		if (generation !== renderGeneration) return undefined;
 
 		let html: HTMLElement | undefined;
 
@@ -280,6 +340,7 @@ export namespace _MarkdownRendererInternal {
 		catch (e) {
 			return failRender(file, e);
 		}
+		if (generation !== renderGeneration) return undefined;
 
 		const view = renderLeaf.view;
 		const viewType = view.getViewType();
@@ -303,6 +364,7 @@ export namespace _MarkdownRendererInternal {
 				html = await renderGeneric(view, options);
 				break;
 		}
+		if (generation !== renderGeneration) return undefined;
 
 		if (checkCancelled()) return undefined;
 		if (!html) return failRender(file, "Failed to render file!");
@@ -313,6 +375,7 @@ export namespace _MarkdownRendererInternal {
 	}
 
 	export async function renderMarkdown(markdown: string, options: MarkdownRendererOptions): Promise<HTMLElement | undefined> {
+		renderFailureReported = false;
 		const loneFile = !batchStarted;
 		if (loneFile) {
 			ExportLog.log("Exporting single file, starting batch");
@@ -593,10 +656,13 @@ export namespace _MarkdownRendererInternal {
 		const cachedSectionCount = sections.filter(
 			(section) => (section.html?.trim().length ?? 0) > 0
 		).length;
+		const renderCallbackTimeout =
+			sections.length > 0 && cachedSectionCount === sections.length
+				? 750
+				: 5_000;
 		let rendered = false;
 		// @ts-ignore
 		preview.renderer.onRendered(() => {
-			console.log("Rendered");
 			rendered = true;
 		});
 
@@ -609,7 +675,7 @@ export namespace _MarkdownRendererInternal {
 				rendered ||
 				sections.every((section) => section.rendered) ||
 				checkCancelled(),
-			5_000,
+			renderCallbackTimeout,
 			16
 		);
 		if (checkCancelled()) return undefined;
@@ -645,8 +711,7 @@ export namespace _MarkdownRendererInternal {
 		}
 
 		// wait until the sizer contains all the sections
-		ExportLog.log("Waiting for all sections to be counted...");
-		var sectionsSuccess = await waitUntil(
+		await waitUntil(
 			() => {
 				return (
 					getSizerEl().children.length >= sections.length ||
@@ -657,13 +722,6 @@ export namespace _MarkdownRendererInternal {
 			16
 		);
 		if (checkCancelled()) return undefined;
-
-		if (!sectionsSuccess) {
-			ExportLog.log(
-				`Preview attached ${getSizerEl().children.length} of ${sections.length} sections; missing sections will be restored from cache.`,
-				"Repairing preview"
-			);
-		}
 
 		// compile dataview
 		if (DataviewRenderer.isDataviewEnabled())
@@ -681,8 +739,7 @@ export namespace _MarkdownRendererInternal {
 			}
 		}
 
-		// wait for transclusions
-		ExportLog.log("Waiting for transclusions to render...");
+		// wait for transclusions without emitting a per-document progress line
 		await waitUntil(
 			() =>
 				!preview.containerEl.querySelector(
@@ -708,8 +765,7 @@ export namespace _MarkdownRendererInternal {
 			);
 		}
 
-		// wait for generic plugins
-		ExportLog.log("Waiting for generic plugins to render...");
+		// wait for generic plugins without emitting a per-document progress line
 		await waitUntil(
 			() =>
 				!preview.containerEl.querySelector(
@@ -770,16 +826,26 @@ export namespace _MarkdownRendererInternal {
 		const finalEmptySemanticSections =
 			countEmptySemanticSections(liveSizerEl);
 		let sectionSnapshots: HTMLElement[] | undefined;
+		let lightweightCacheRepair = false;
 		if (
 			liveSizerEl.children.length < sections.length ||
 			finalEmptySemanticSections > 0
 		) {
-			ExportLog.log(
-				`Restoring ${finalEmptySemanticSections} virtualized sections from the renderer cache.`,
-				"Repairing preview"
-			);
-
-			const snapshots = sections.map((section) =>
+			const cachedSections = sections.map((section) => section.html?.trim() ?? "");
+			const useLightweightCacheRepair =
+				sections.length >= 300 &&
+				liveSizerEl.children.length < sections.length &&
+				cachedSections.every((html) => html.length > 0);
+			if (useLightweightCacheRepair)
+			{
+				ExportLog.log(
+					`Using lightweight cached assembly for ${sections.length} virtualized sections.`,
+					"Preparing large preview"
+				);
+				newSizerEl.innerHTML = cachedSections.join("");
+				lightweightCacheRepair = true;
+			}
+			const snapshots = useLightweightCacheRepair ? [] : sections.map((section) =>
 				countEmptySemanticSections(section.el) === 0
 					? section.el.cloneNode(true) as HTMLElement
 					: undefined
@@ -792,7 +858,7 @@ export namespace _MarkdownRendererInternal {
 
 			for (
 				let batchStart = 0;
-				batchStart < missingIndexes.length && !repairFailed;
+				batchStart < missingIndexes.length && !repairFailed && !useLightweightCacheRepair;
 				batchStart += repairBatchSize
 			) {
 				const batchIndexes = missingIndexes.slice(
@@ -830,8 +896,8 @@ export namespace _MarkdownRendererInternal {
 			}
 
 			if (
-				repairFailed ||
-				snapshots.some((snapshot) => !snapshot)
+				!useLightweightCacheRepair &&
+				(repairFailed || snapshots.some((snapshot) => !snapshot))
 			) {
 				newMarkdownEl.remove();
 				reportFallbackRenderer(
@@ -850,35 +916,41 @@ export namespace _MarkdownRendererInternal {
 				.map((child) => child as HTMLElement);
 		}
 
-		const repairedContainer = batchDocument.body.createDiv();
-		for (const snapshot of sectionSnapshots) {
-			repairedContainer.appendChild(snapshot.cloneNode(true));
+		if (!lightweightCacheRepair)
+		{
+			const repairedContainer = batchDocument.body.createDiv();
+			for (const snapshot of sectionSnapshots) {
+				repairedContainer.appendChild(snapshot.cloneNode(true));
+			}
+			const remainingEmptySections =
+				countEmptySemanticSections(repairedContainer);
+			repairedContainer.remove();
+			if (remainingEmptySections > 0) {
+				newMarkdownEl.remove();
+				return failRender(
+					preview.file,
+					`Rendered document still contains ${remainingEmptySections} empty semantic sections after repair.`
+				);
+			}
+			newSizerEl.empty();
 		}
-		const remainingEmptySections =
-			countEmptySemanticSections(repairedContainer);
-		repairedContainer.remove();
-		if (remainingEmptySections > 0) {
-			newMarkdownEl.remove();
-			return failRender(
-				preview.file,
-				`Rendered document still contains ${remainingEmptySections} empty semantic sections after repair.`
-			);
-		}
-
-		newSizerEl.empty();
 
 		// create the markdown-preview-pusher element
 		if (options.createPusherElement) {
-			newSizerEl.createDiv({
+			const pusher = newSizerEl.createDiv({
 				attr: {
 					class: "markdown-pusher",
 					style: "width: 1px; height: 0.1px; margin-bottom: 0px;",
 				},
 			});
+			if (lightweightCacheRepair) newSizerEl.prepend(pusher);
 		}
 
-		for (const snapshot of sectionSnapshots) {
-			newSizerEl.appendChild(snapshot);
+		if (!lightweightCacheRepair)
+		{
+			for (const snapshot of sectionSnapshots) {
+				newSizerEl.appendChild(snapshot);
+			}
 		}
 
 		// get banner plugin banner and insert it before the sizer element
@@ -1432,6 +1504,9 @@ export namespace _MarkdownRendererInternal {
 		errorInBatch = false;
 		cancelled = false;
 		batchStarted = true;
+		rendererNeedsReset = false;
+		rendererResetReason = "";
+		renderGeneration = 0;
 		loadingContainer = undefined;
 		logContainer = undefined;
 		logShowing = false;

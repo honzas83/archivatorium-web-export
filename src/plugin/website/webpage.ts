@@ -804,25 +804,16 @@ export class Webpage extends Attachment
 
 	public dispose()
 	{
-		this.viewElement?.remove();
+		// A resumed or failed page may not have reached renderDocument(), so it
+		// has no DOM document to release yet.
+		this.pageDocument?.querySelector(".obsidian-document")?.remove();
 		// @ts-ignore
 		this.pageDocument = undefined;
 
 		if (!this.exportOptions.combineAsSingleFile)
 		{
 			this.data = "";
-			if (this._outputData)
-			{
-				this._outputData.html = "";
-				this._outputData.searchContent = "";
-				this._outputData.metadataSearchText = "";
-				this._outputData.srcLinks = [];
-				this._outputData.hrefLinks = [];
-				this._outputData.linksToOtherFiles = [];
-				this._outputData.headings = [];
-				this._outputData.renderedHeadings = [];
-				this._outputData.backlinks = [];
-			}
+			this._outputData = undefined;
 			this._attachments = undefined;
 			// @ts-ignore
 			this.headerMap = undefined;

@@ -3,7 +3,7 @@ import { FileTree } from "src/plugin/features/file-tree";
 import {  TAbstractFile, TFile, TFolder } from "obsidian";
 import {  Settings } from "src/plugin/settings/settings";
 import { Path } from "src/plugin/utils/path";
-import { ExportLog, MarkdownRendererAPI } from "src/plugin/render-api/render-api";
+import { ExportLog, MarkdownRendererAPI, _MarkdownRendererInternal } from "src/plugin/render-api/render-api";
 import { AssetLoader } from "src/plugin/asset-loaders/base-asset";
 import { AssetType, InlinePolicy, Mutability } from "src/plugin/asset-loaders/asset-types.js";
 import { ExportPipelineOptions } from "src/plugin/website/pipeline-options.js";
@@ -15,7 +15,7 @@ import { GraphView } from "src/plugin/features/graph-view";
 import { ThemeToggle } from "src/plugin/features/theme-toggle";
 import { SearchInput } from "src/plugin/features/search-input";
 import { Utils } from "src/plugin/utils/utils";
-import { mkdir, rename, writeFile } from "fs/promises";
+import { appendFile, mkdir, rename, unlink, writeFile } from "fs/promises";
 
 
 export class Website
@@ -24,6 +24,8 @@ export class Website
 	public index: WebsiteIndex;
 	
 	private sourceFiles: TFile[] = [];
+	private webpageSourceFiles: TFile[] = [];
+	private fileTreeOrderBySourcePath: Map<string, number> = new Map();
 
 	public fileTree: FileTree;
 	public fileTreeAsset: AssetLoader;
@@ -32,6 +34,15 @@ export class Website
 	public outputProgressWeight: number = 1;
 	private totalProgressWeight: number = 1;
 	private fileTreeProgressBudget: number = 0;
+	private exportTimingRows: string[] = [];
+	private exportTimingSequence: number = 0;
+	private readonly exportTimingPath = ".export-timings.jsonl";
+	private readonly exportFileLogPath = ".export-files.log";
+	private readonly renderWatchdogMs = 120_000;
+	private readonly currentRenderPath = ".export-current-render.json";
+	private progressStage = "";
+	private progressStartedAt = 0;
+	private progressStartedCompleted = 0;
 
 	constructor(destination: Path | string, options?: ExportPipelineOptions)
 	{
@@ -126,6 +137,8 @@ export class Website
 	{
 		ExportLog.resetProgress();
 		this.sourceFiles = files?.filter((file) => file) ?? [];
+		this.webpageSourceFiles = [];
+		this.fileTreeOrderBySourcePath.clear();
 		// Indexing is intentionally excluded from export progress. It prepares
 		// the workload, while the measured work starts with the optional file
 		// tree and continues through page and attachment output.
@@ -147,6 +160,20 @@ export class Website
 		let rootPath = this.findCommonRootPath(this.sourceFiles);
 		this.exportOptions.exportRoot = rootPath;
 		console.log("Root path: " + rootPath);
+
+		// Server-backed export is the only supported mode. It keeps the browser
+		// bootstrap and exporter metadata bounded even for archival-scale vaults.
+		const useLargeVaultMode = true;
+		this.exportOptions.combineAsSingleFile = false;
+		this.exportOptions.searchOptions.serverSide = true;
+		if (this.exportOptions.rssOptions.enabled)
+		{
+			this.exportOptions.rssOptions.enabled = false;
+			ExportLog.log(
+				"Large-vault mode does not generate an RSS feed.",
+				"Disabling RSS"
+			);
+		}
 
 		await AssetHandler.reloadAssets(this.exportOptions);
 		this.index = new WebsiteIndex();
@@ -170,7 +197,6 @@ export class Website
 
 		// create webpages
 		let initializedFiles = 0;
-		const useLargeVaultMode = this.sourceFiles.length > 100;
 		const exportMediaDirectly =
 			!this.exportOptions.combineAsSingleFile &&
 			(useLargeVaultMode || this.exportOptions.searchOptions.serverSide);
@@ -195,9 +221,9 @@ export class Website
 				// Create pages for normal convertable files (md, canvas, excalidraw, etc) as well as convertable media files (png, pdf, etc)
 				if (isConvertable && !(exportMediaDirectly && isViewableMedia))
 				{
-					let webpage = new Webpage(file, file.name, this, this.exportOptions);
-					webpage.showInTree = true;
-					await this.index.addFile(webpage, false);
+					// Avoid retaining a Webpage and its future render state for every note.
+					// It is constructed only when this source file reaches the render loop.
+					this.webpageSourceFiles.push(file);
 				}
 
 			}
@@ -231,7 +257,14 @@ export class Website
 			// create file tree asset
 			if (this.exportOptions.fileNavigationOptions.enabled)
 			{
-				const paths = this.index.attachmentsShownInTree.map((file) => new Path(file.sourcePathRootRelative ?? ""));
+				const rootPrefix = this.exportOptions.exportRoot
+					? `${this.exportOptions.exportRoot}/`
+					: "";
+				const paths = this.sourceFiles.map((file) => new Path(
+					rootPrefix && file.path.startsWith(rootPrefix)
+						? file.path.slice(rootPrefix.length)
+						: file.path
+				));
 				ExportLog.setRemainingOperationItems(
 					paths.length + this.sourceFiles.length
 				);
@@ -271,6 +304,16 @@ export class Website
 					const fileTreeItem = this.fileTree?.getItemBySourcePath(file.sourcePathRootRelative);
 					file.treeOrder = fileTreeItem?.treeOrder ?? 0;
 				});
+				for (const sourceFile of this.webpageSourceFiles)
+				{
+					const sourcePath = rootPrefix && sourceFile.path.startsWith(rootPrefix)
+						? sourceFile.path.slice(rootPrefix.length)
+						: sourceFile.path;
+					this.fileTreeOrderBySourcePath.set(
+						sourceFile.path,
+						this.fileTree?.getItemBySourcePath(sourcePath)?.treeOrder ?? 0
+					);
+				}
 
 				tempContainer.remove();
 				this.fileTreeAsset = new AssetLoader("file-tree.html", data, null, AssetType.HTML, InlinePolicy.Auto, true, Mutability.Temporary);
@@ -295,11 +338,14 @@ export class Website
 	public async build(files?: TFile[]): Promise<Website | undefined>
 	{
 		if (files) await this.load(files);
+		this.exportTimingRows = [];
+		this.exportTimingSequence = 0;
+		await this.destination.joinString(this.exportTimingPath).write("");
 
 		console.log(`Creating website with ${this.sourceFiles.length} files.`);
 
 		await this.buildTemplate();
-		await this.writeProgress("rendering-and-writing-pages", 0, this.index.webpages.length);
+		await this.writeProgress("rendering-and-writing-pages", 0, this.webpageSourceFiles.length);
 		
 		// this.refreshUpdatedFilesList();
 		
@@ -316,12 +362,7 @@ export class Website
 		await MarkdownRendererAPI.beginBatch(this.exportOptions);
 		this.validateSettings();
 
-		// only render the updated and new files
-		let webpages = this.index.webpages;
-		webpages = webpages.filter((webpage) => 
-		{
-			return this.index.isNewOrUpdated(webpage);
-		});
+		const webpageFiles = this.webpageSourceFiles;
 
 		const downloads = AssetHandler.getDownloads(this.destination, this.exportOptions);
 		await this.index.addFiles(downloads);
@@ -333,10 +374,10 @@ export class Website
 				.filter((file) => !(file instanceof Webpage))
 				.map((file) => file.targetPath.path)
 		);
-		const initialWorkTotal = webpages.length +
+		const initialWorkTotal = webpageFiles.length +
 			(this.exportOptions.combineAsSingleFile ? 0 : pendingAttachmentPaths.size);
 		ExportLog.setRemainingOperationItems(initialWorkTotal);
-		ExportLog.startWorkPhase(webpages.length);
+		ExportLog.startWorkPhase(webpageFiles.length);
 		const completedPreparationBudget =
 			this.fileTreeProgressBudget;
 		this.outputProgressWeight = initialWorkTotal > 0
@@ -345,6 +386,15 @@ export class Website
 		const completeDocument = async (subMessage: string): Promise<void> =>
 		{
 			progress += 1;
+			// Persist the resume index before reporting a checkpoint boundary as done.
+			// The Docker runner may intentionally restart immediately after this log.
+			if (progress % 500 === 0)
+			{
+				await this.index.writeCheckpoint();
+			}
+			const fileLogLine = `[export-file] ${progress}/${webpageFiles.length} ${subMessage}`;
+			console.log(fileLogLine);
+			await this.writeExportFileLog(fileLogLine);
 			ExportLog.advanceWorkProgress(
 				this.outputProgressWeight,
 				"Rendering and Writing Pages",
@@ -353,46 +403,118 @@ export class Website
 			);
 			if (progress % 25 === 0)
 			{
-				await this.writeProgress("rendering-and-writing-pages", progress, webpages.length);
+				await this.writeProgress("rendering-and-writing-pages", progress, webpageFiles.length);
 			}
-			if (progress % 500 === 0)
+			if (progress % 50 === 0)
 			{
-				await this.index.writeCheckpoint();
+				await this.flushExportTimings();
 			}
 			await Utils.delay(0);
 		};
 
-		for (const webpage of webpages)
+		for (const sourceFile of webpageFiles)
 		{
-			if (ExportLog.isCancelled()) return;
+			const webpage = new Webpage(sourceFile, sourceFile.name, this, this.exportOptions);
+			webpage.showInTree = true;
+			webpage.treeOrder = this.fileTreeOrderBySourcePath.get(sourceFile.path) ?? 0;
+			if (ExportLog.isCancelled())
+			{
+				await this.flushExportTimings();
+				return;
+			}
+			if (await this.index.isGeneratedWebpageCurrent(webpage))
+			{
+				console.log(`[export-resume] ${webpage.source.path}`);
+				await completeDocument(`Reused ${webpage.source.path}`);
+				continue;
+			}
 
 			ExportLog.setProgress(
 				0,
 				"Rendering and Writing Pages",
 				webpage.source.path
 			);
+			await this.writeCurrentRender(webpage.source.path);
 
-			const rendered = await webpage.renderDocument();
+			const documentStart = performance.now();
+			let renderTimedOut = false;
+			let renderTimeout: ReturnType<typeof setTimeout> | undefined;
+			const renderPromise = webpage.renderDocument();
+			const rendered = await new Promise<Webpage | undefined>((resolve) =>
+			{
+				let settled = false;
+				renderTimeout = setTimeout(async () =>
+				{
+					if (settled) return;
+					settled = true;
+					renderTimedOut = true;
+					_MarkdownRendererInternal.invalidateCurrentRender(
+						`watchdog timeout after ${this.renderWatchdogMs} ms for ${webpage.source.path}`
+					);
+					ExportLog.error(
+						`The renderer exceeded ${this.renderWatchdogMs / 1000} seconds. The document was skipped and the render view was reset.`,
+						`Render watchdog: ${webpage.source.path}`
+					);
+					await _MarkdownRendererInternal.resetForNextDocument("watchdog timeout");
+					resolve(undefined);
+				}, this.renderWatchdogMs);
+				renderPromise.then((value) =>
+				{
+					if (settled) return;
+					settled = true;
+					if (renderTimeout) clearTimeout(renderTimeout);
+					resolve(value);
+				}).catch(() =>
+				{
+					if (settled) return;
+					settled = true;
+					if (renderTimeout) clearTimeout(renderTimeout);
+					resolve(undefined);
+				});
+			});
+			const renderMs = performance.now() - documentStart;
 			if (!rendered)
 			{
+				await this.clearCurrentRender();
+				this.recordExportTiming({ renderMs, resetMs: _MarkdownRendererInternal.lastRenderResetMs, failed: true, timedOut: renderTimedOut, sourcePath: webpage.source.path });
+				webpage.dispose();
 				await completeDocument(webpage.source.path);
 				continue;
 			}
 			
+			const attachmentsStart = performance.now();
 			const attachments = await webpage.getAttachments();
 			await this.index.addFiles(attachments);
+			const attachmentsMs = performance.now() - attachmentsStart;
+			const buildStart = performance.now();
 			const built = await webpage.build();
-			if (built) await this.index.addFile(webpage);
-			else await this.index.removeFile(webpage);
+			const buildMs = performance.now() - buildStart;
+			const indexStart = performance.now();
+			if (built) await this.index.recordGeneratedWebpage(webpage);
+			const indexMs = performance.now() - indexStart;
 			// save the file and then dispose of the webpage
+			const writeStart = performance.now();
 			if (!this.exportOptions.combineAsSingleFile)
 				await webpage.download();
+			const writeMs = performance.now() - writeStart;
 			
 			if (this.exportOptions.autoDisposeWebpages)
 				webpage.dispose();
+			await this.clearCurrentRender();
 
+			this.recordExportTiming({
+				renderMs,
+				attachmentsMs,
+				buildMs,
+				indexMs,
+				writeMs,
+				resetMs: _MarkdownRendererInternal.lastRenderResetMs,
+				failed: !built,
+				sourcePath: webpage.source.path,
+			});
 			await completeDocument(webpage.source.path);
 		}
+		await this.flushExportTimings();
 	
 		if (this.exportOptions.rssOptions.enabled)
 		{
@@ -409,7 +531,7 @@ export class Website
 		try
 		{
 			await this.index.finalize();
-			await this.writeProgress("finalizing", progress, webpages.length);
+			await this.writeProgress("finalizing", progress, webpageFiles.length);
 		}
 		catch (error)
 		{
@@ -419,12 +541,68 @@ export class Website
 		// this.refreshUpdatedFilesList();
 
 		this.validateSite();
-		await this.writeProgress("complete", progress, webpages.length);
+		await this.writeProgress("complete", progress, webpageFiles.length);
 		return this;
+	}
+
+	private recordExportTiming(timings: {
+		renderMs: number;
+		attachmentsMs?: number;
+		buildMs?: number;
+		indexMs?: number;
+		writeMs?: number;
+		resetMs?: number;
+		failed: boolean;
+		timedOut?: boolean;
+		sourcePath?: string;
+	}): void
+	{
+		const memory = process.memoryUsage();
+		this.exportTimingRows.push(JSON.stringify({
+			item: ++this.exportTimingSequence,
+			...timings,
+			heapUsed: memory.heapUsed,
+			rss: memory.rss,
+			timestamp: Date.now(),
+		}));
+	}
+
+	private async flushExportTimings(): Promise<void>
+	{
+		if (this.exportTimingRows.length === 0) return;
+		const timingPath = this.destination.joinString(this.exportTimingPath).absoluted();
+		await appendFile(timingPath.pathname, `${this.exportTimingRows.join("\n")}\n`);
+		this.exportTimingRows = [];
+	}
+
+	private async writeExportFileLog(line: string): Promise<void>
+	{
+		const fileLogPath = this.destination.joinString(this.exportFileLogPath).absoluted();
+		await appendFile(fileLogPath.pathname, `${line}\n`);
+	}
+
+	private async writeCurrentRender(sourcePath: string): Promise<void>
+	{
+		const progressPath = this.destination.joinString(this.currentRenderPath).absoluted();
+		await writeFile(`${progressPath.pathname}.tmp`, JSON.stringify({ sourcePath, startedAt: Date.now() }));
+		await rename(`${progressPath.pathname}.tmp`, progressPath.pathname);
+	}
+
+	private async clearCurrentRender(): Promise<void>
+	{
+		const progressPath = this.destination.joinString(this.currentRenderPath).absoluted();
+		await unlink(progressPath.pathname).catch(() => undefined);
 	}
 
 	private async writeProgress(stage: string, completed: number, total: number): Promise<void>
 	{
+		const now = Date.now();
+		if (stage !== this.progressStage || completed < this.progressStartedCompleted)
+		{
+			this.progressStage = stage;
+			this.progressStartedAt = now;
+			this.progressStartedCompleted = completed;
+		}
 		const progressPath = this.destination.joinString(".export-progress.json").absoluted();
 		const temporaryPath = `${progressPath.pathname}.tmp`;
 		const memory = process.memoryUsage();
@@ -442,6 +620,22 @@ export class Website
 			},
 		}));
 		await rename(temporaryPath, progressPath.pathname);
+		const percentage = total > 0 ? ((completed / total) * 100).toFixed(1) : "100.0";
+		const elapsedSeconds = Math.max(0, (now - this.progressStartedAt) / 1000);
+		const processed = Math.max(0, completed - this.progressStartedCompleted);
+		const itemsPerSecond = elapsedSeconds > 0 ? processed / elapsedSeconds : 0;
+		const remainingSeconds = itemsPerSecond > 0 ? Math.max(0, (total - completed) / itemsPerSecond) : undefined;
+		const eta = remainingSeconds === undefined
+			? "calculating"
+			: remainingSeconds < 3600
+				? `${Math.floor(remainingSeconds / 60)}m ${Math.floor(remainingSeconds % 60)}s`
+				: `${Math.floor(remainingSeconds / 3600)}h ${Math.floor((remainingSeconds % 3600) / 60)}m`;
+		console.log(
+			`[export-progress] ${stage} ${completed}/${total} (${percentage}%) ` +
+			`rate=${itemsPerSecond.toFixed(2)}/s ETA=${eta} ` +
+			`heap=${(memory.heapUsed / 1024 / 1024 / 1024).toFixed(2)}GB ` +
+			`rss=${(memory.rss / 1024 / 1024 / 1024).toFixed(2)}GB`
+		);
 	}
 
 	/** 

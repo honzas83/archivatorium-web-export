@@ -61,6 +61,7 @@ export interface WebpageData extends FileData
 	icon: string;
 	description: string;
 	author: string;
+	rssDate?: string;
 	coverImageURL: string;
 	fullURL: string;
 }
@@ -176,8 +177,10 @@ export class WebsiteOptions
 export class WebsiteData
 {
 	ignoreMetadata: boolean = false;
+	serverMetadata: boolean = false;
 	metadataShards?: {
-		webpages: string;
+		webpages?: string;
+		webpageBuckets?: string[];
 		fileInfo: string;
 	};
 	webpages: {[targetPath: string]: WebpageData} = {};
