@@ -265,10 +265,11 @@ export class ObsidianWebsite {
 		});
 
 		// Set initial history state
+		const initialQuery = LinkHandler.getQueryFromURL(window.location.href);
 		if (this.isHttp) {
 			const initialURL = this.getBrowserURL(
 				this.document.pathname,
-				LinkHandler.getQueryFromURL(window.location.href),
+				initialQuery,
 				LinkHandler.getHashFromURL(window.location.href),
 			);
 			document.title = this.document.title;
@@ -278,9 +279,24 @@ export class ObsidianWebsite {
 		this.isLoaded = true;
 		this.onloadCallbacks.forEach((cb) => cb(this.document));
 		await this.document.show();
+		if (initialQuery.startsWith("query=")) {
+			await this.search?.searchParseFilters(initialQuery.substring(6));
+		}
 	}
 
 	private initEvents() {
+		document.addEventListener("click", (event) => {
+			const target = event.target as Element | null;
+			const tagLink = target?.closest("a.tag") as HTMLAnchorElement | null;
+			if (!tagLink || event.defaultPrevented) return;
+			const href = tagLink.getAttribute("href");
+			if (!href) return;
+
+			event.preventDefault();
+			event.stopPropagation();
+			void this.loadURL(href);
+		});
+
 		window.addEventListener("popstate", async (e) => {
 			console.log("popstate", e);
 			const target = e.state?.url ?? e.state?.pathname ??
