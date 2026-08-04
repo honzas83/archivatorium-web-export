@@ -267,6 +267,7 @@ export class ObsidianWebsite {
 		if (this.isHttp) {
 			let initialPath = this.document.pathname;
 			if (initialPath == "index.html") initialPath = "";
+			document.title = this.document.title;
 			history.replaceState(
 				{ pathname: initialPath },
 				this.document.title,

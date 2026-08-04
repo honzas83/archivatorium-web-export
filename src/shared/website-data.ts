@@ -57,6 +57,7 @@ export interface WebpageData extends FileData
 	attachments: string[];
 
 	title: string;
+	browserTitle?: string;
 	pathToRoot: string;
 	icon: string;
 	description: string;

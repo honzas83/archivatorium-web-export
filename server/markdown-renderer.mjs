@@ -89,26 +89,30 @@ export class MarkdownDocumentRenderer {
 		});
 	}
 
-	async render({ sourcePath, modifiedTime, sourceSize, markdown, loadMarkdown, resolveLink }) {
+	async render({ sourcePath, modifiedTime, sourceSize, title, displayTitle, markdown, loadMarkdown, resolveLink }) {
 		const cached = this.cache.get(sourcePath);
-		if (cached && cached.modifiedTime === modifiedTime && cached.sourceSize === sourceSize) {
+		if (cached && cached.modifiedTime === modifiedTime && cached.sourceSize === sourceSize && cached.title === title && cached.displayTitle === displayTitle) {
 			this.cache.delete(sourcePath);
 			this.cache.set(sourcePath, cached);
 			return cached.value;
 		}
 
 		this.resolveLink = resolveLink;
-		const value = this.renderMarkdown(markdown ?? await loadMarkdown());
-		this.cache.set(sourcePath, { modifiedTime, sourceSize, value });
+		const value = this.renderMarkdown(markdown ?? await loadMarkdown(), displayTitle || title);
+		this.cache.set(sourcePath, { modifiedTime, sourceSize, title, displayTitle, value });
 		while (this.cache.size > this.maxEntries) this.cache.delete(this.cache.keys().next().value);
 		return value;
 	}
 
-	renderMarkdown(markdown) {
+	renderMarkdown(markdown, title = "") {
 		const source = this.replaceObsidianSyntax(String(markdown).replace(FRONTMATTER_PATTERN, ""));
 		const content = splitCallouts(source, (calloutMarkdown) => this.markdown.render(calloutMarkdown));
 		const html = this.markdown.render(content);
-		return `<div class="obsidian-document markdown-reading-view"><div class="markdown-preview-view"><div class="markdown-preview-sizer">${html}</div></div></div>`;
+		const pageTitle = String(title).trim();
+		const titleHeader = pageTitle
+			? `<div class="header"><h1 class="page-title heading inline-title" id="${escapeAttribute(slugify(pageTitle))}_0">${escapeAttribute(pageTitle)}</h1><div class="data-bar"></div></div>`
+			: "";
+		return `<div class="obsidian-document markdown-preview-view markdown-rendered is-readable-line-width allow-fold-headings allow-fold-lists" data-type="markdown"><div class="markdown-preview-sizer markdown-preview-section">${titleHeader}${html}</div></div>`;
 	}
 
 	replaceObsidianSyntax(markdown) {

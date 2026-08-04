@@ -289,6 +289,8 @@ async function handlePage(request, response) {
 			sourcePath: sourcePath.sourcePath,
 			modifiedTime: sourceStat.mtimeMs,
 			sourceSize: sourceStat.size,
+			title: data.title,
+			displayTitle: path.posix.basename(data.sourcePath, path.posix.extname(data.sourcePath)),
 			loadMarkdown: () => readFile(sourcePath.absolutePath, "utf8"),
 			resolveLink: (target) => resolveCorpusLink(database, sourcePath.sourcePath, target),
 		});

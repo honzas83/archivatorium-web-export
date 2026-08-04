@@ -55,6 +55,7 @@ Text with [[Target]] and ![[Report.pdf]]. #Topic/Child
 		await assert.rejects(stat(path.join(output, "site-lib", "corpus")));
 		const shell = await readFile(path.join(output, "index.html"), "utf8");
 		assert.match(shell, /webpage.js/);
+		assert.match(shell, /<base href="\/">/);
 		assert.equal((shell.match(/sidebar-collapse-icon/g) ?? []).length, 2);
 		assert.equal((shell.match(/sidebar-handle/g) ?? []).length, 2);
 		assert.equal(JSON.parse(await readFile(path.join(output, "site-lib", "metadata.json"), "utf8")).serverMetadata, true);

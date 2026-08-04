@@ -97,7 +97,7 @@ export class WebpageDocument {
 			(this.info?.type as DocumentType) ?? DocumentType.Markdown;
 
 		// set title
-		this.title = this.info?.title ?? this.pathname;
+		this.title = this.info?.browserTitle || this.info?.title || this.pathname;
 	}
 
 	public findHeader(predicate: (header: Header) => boolean): Header | null {
@@ -161,7 +161,7 @@ export class WebpageDocument {
 			const payload = await documentReq.json() as { data: WebpageData, html: string };
 			this.info = payload.data;
 			this.documentType = payload.data.type as DocumentType;
-			this.title = payload.data.title ?? this.pathname;
+			this.title = payload.data.browserTitle || payload.data.title || this.pathname;
 			this.sourceHtml = new DOMParser().parseFromString(payload.html, "text/html");
 		} else {
 			const documentReq = await ObsidianSite.fetch(this.pathname);

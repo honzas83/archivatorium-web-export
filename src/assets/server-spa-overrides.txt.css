@@ -1,0 +1,21 @@
+/* These rules intentionally load after feature styles to match the exported
+   Obsidian reading view when no live Obsidian stylesheet is available. */
+body {
+  font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 15px;
+}
+
+:root body {
+  --line-width: min(640px, calc(100vw - 2em));
+  --line-width-adaptive: var(--line-width);
+  --file-line-width: var(--line-width);
+}
+
+.markdown-preview-sizer > .header > .page-title {
+	width: 100%;
+  margin: 16px 0 12.944px !important;
+  font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 25.888px;
+  font-weight: 700;
+  line-height: 31.0656px;
+}

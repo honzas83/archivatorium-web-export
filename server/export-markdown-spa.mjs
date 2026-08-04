@@ -328,7 +328,7 @@ function featureOptions(exportOptions) {
 function createShell(siteName) {
 	const collapseSidebarIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="svg-icon sidebar-toggle-button-icon"><rect x="1" y="2" width="22" height="20" rx="4"></rect><rect x="4" y="5" width="2" height="14" rx="2" fill="currentColor" class="sidebar-toggle-icon-inner"></rect></svg>`;
 	return `<!doctype html>
-<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>${siteName}</title><link rel="stylesheet" href="/site-lib/styles/obsidian.css"><link rel="stylesheet" href="/site-lib/styles/global-variable-styles.css"><link rel="stylesheet" href="/site-lib/styles/main-styles.css"><link rel="stylesheet" href="/site-lib/styles/deferred.css"><script defer src="/site-lib/scripts/deferred.js"></script><script defer src="/site-lib/scripts/webpage.js"></script></head>
+<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><base href="/"><title>${siteName}</title><link rel="stylesheet" href="/site-lib/styles/obsidian.css"><link rel="stylesheet" href="/site-lib/styles/global-variable-styles.css"><link rel="stylesheet" href="/site-lib/styles/main-styles.css"><link rel="stylesheet" href="/site-lib/styles/deferred.css"><link rel="stylesheet" href="/site-lib/styles/server-spa.css"><script defer src="/site-lib/scripts/deferred.js"></script><script defer src="/site-lib/scripts/webpage.js"></script></head>
 <body class="publish css-settings-manager show-inline-title show-ribbon is-focused"><script src="/site-lib/scripts/theme-load.js"></script><div id="main"><div id="navbar"></div><div id="main-horizontal"><div id="left-content" class="leaf"><div id="left-sidebar" class="sidebar"><div class="sidebar-handle"></div><div class="sidebar-topbar"><div class="topbar-content"><div id="search-container"><div id="search-wrapper"><input type="search" enterkeyhint="search" spellcheck="false" placeholder="Search..."><div id="search-clear-button" aria-label="Clear search"></div></div></div></div><div class="clickable-icon sidebar-collapse-icon">${collapseSidebarIcon}</div></div><div class="sidebar-content-wrapper"><div id="left-sidebar-content" class="leaf-content"><div id="file-explorer" class="nav-files-container"></div></div></div></div></div><div id="center-content" class="leaf"></div><div id="right-content" class="leaf"><div id="right-sidebar" class="sidebar"><div class="sidebar-handle"></div><div class="sidebar-topbar"><div class="topbar-content"></div><div class="clickable-icon sidebar-collapse-icon">${collapseSidebarIcon}</div></div><div class="sidebar-content-wrapper"><div id="right-sidebar-content" class="leaf-content"></div></div></div></div></div></div></body></html>`;
 }
 
@@ -347,6 +347,7 @@ async function writeAssets(exportRoot) {
 		writeFile(path.join(styles, "global-variable-styles.css"), ""),
 		writeFile(path.join(styles, "main-styles.css"), pluginStyles),
 		cp(path.join(REPOSITORY_ROOT, "src/assets/deferred.txt.css"), path.join(styles, "deferred.css")),
+		cp(path.join(REPOSITORY_ROOT, "src/assets/server-spa-overrides.txt.css"), path.join(styles, "server-spa.css")),
 		cp(path.join(REPOSITORY_ROOT, "src/assets/deferred.txt.js"), path.join(scripts, "deferred.js")),
 		cp(path.join(REPOSITORY_ROOT, "src/assets/theme-load.txt.js"), path.join(scripts, "theme-load.js")),
 		cp(path.join(REPOSITORY_ROOT, "src/frontend/dist/index.txt.js"), path.join(scripts, "webpage.js")),
@@ -421,6 +422,7 @@ export async function exportMarkdownSpa({ vaultRoot, exportRoot, configPath } = 
 			record = { ...existing.record, data: { ...existing.record.data } };
 			record.data.treeOrder = treeOrder;
 			record.data.backlinks = Array.from(backlinks.get(document.sourcePath) ?? []);
+			record.data.browserTitle ??= path.posix.basename(document.sourcePath, ".md");
 		} else {
 			const markdown = await readFile(document.absolutePath, "utf8");
 			const frontmatter = parseFrontmatter(markdown);
@@ -444,6 +446,7 @@ export async function exportMarkdownSpa({ vaultRoot, exportRoot, configPath } = 
 				type: "markdown",
 				data: null,
 				title,
+				browserTitle: path.posix.basename(document.sourcePath, ".md"),
 				aliases,
 				inlineTags,
 				frontmatterTags,
