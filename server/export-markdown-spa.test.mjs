@@ -21,7 +21,7 @@ citekey: Source-2026
 ---
 # Source heading
 
-Text with [[Target]] and ![[Report.pdf]]. #Topic/Child
+Text with [[Target]] and [Report source](Report.pdf). #Topic/Child
 
 > [!info] Metadata
 > Metadata should not be searchable.
@@ -47,7 +47,7 @@ Text with [[Target]] and ![[Report.pdf]]. #Topic/Child
 		assert.deepEqual(source.data.aliases, ["Source alias"]);
 		assert.deepEqual(source.data.attachments, ["folder/report.pdf"]);
 		assert.deepEqual(source.data.links.sort(), ["folder/report.pdf", "folder/target.html"]);
-		assert.match(source.search.content, /Text with Target and Report.pdf/);
+		assert.match(source.search.content, /Text with Target and \[Report source\]/);
 		assert.match(source.search.content, /Trusted HTML/);
 		assert.doesNotMatch(source.search.content, /Metadata should not be searchable|Citation should not be searchable|#Topic\/Child|<span>/);
 		assert.equal(attachment.kind, "file");

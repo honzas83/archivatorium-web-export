@@ -147,7 +147,7 @@ export class Search
 					});
 
 			this.dedicatedSearchResultsList.replaceChildren(list);
-			this.container.after(this.dedicatedSearchResultsList);
+			this.dedicatedSearchResultsList.hidden = false;
 			LinkHandler.initializeLinks(this.dedicatedSearchResultsList);
 		}
 	
@@ -299,6 +299,11 @@ export class Search
 
 	public clear()
 	{
+		if (this.dedicatedSearchResultsList)
+		{
+			this.dedicatedSearchResultsList.replaceChildren();
+			this.dedicatedSearchResultsList.hidden = true;
+		}
 		this.searchRequestId++;
 		this.container?.classList.remove("has-content");
 		this.input.value = "";
@@ -369,6 +374,8 @@ export class Search
 		{
 			this.dedicatedSearchResultsList = document.createElement('div');
 			this.dedicatedSearchResultsList.setAttribute('id', 'search-results');
+			this.dedicatedSearchResultsList.hidden = true;
+			document.getElementById('file-explorer')?.before(this.dedicatedSearchResultsList);
 		}
 
 		return this;

@@ -133,7 +133,13 @@ export class MarkdownDocumentRenderer {
 				if (["avif", "gif", "jpeg", "jpg", "png", "svg", "webp"].includes(extension)) {
 					return `<img class="internal-embed" src="/${escapeAttribute(href)}" alt="${escapeAttribute(label)}">`;
 				}
+				if (extension === "pdf") {
+					return `<iframe class="internal-embed" src="/${escapeAttribute(href)}" title="${escapeAttribute(label)}"></iframe>`;
+				}
 				return `<a class="internal-link internal-embed" href="${escapeAttribute(href)}">${escapeAttribute(label)}</a>`;
+			}
+			if (!resolved.sourcePath.toLowerCase().endsWith(".md")) {
+				return `<a href="/${escapeAttribute(href)}">${escapeAttribute(label)}</a>`;
 			}
 			return `<a class="internal-link" href="${escapeAttribute(href)}">${escapeAttribute(label)}</a>`;
 		});
@@ -153,6 +159,9 @@ export class MarkdownDocumentRenderer {
 					return `<iframe class="internal-embed" src="/${escapeAttribute(href)}" title="${escapeAttribute(label)}"></iframe>`;
 				}
 				return `<a class="internal-link internal-embed" href="${escapeAttribute(href)}">${escapeAttribute(label)}</a>`;
+			}
+			if (!resolved.sourcePath.toLowerCase().endsWith(".md")) {
+				return `<a href="/${escapeAttribute(href)}">${escapeAttribute(label)}</a>`;
 			}
 			return `<a class="internal-link" href="${escapeAttribute(href)}">${escapeAttribute(label)}</a>`;
 		});

@@ -83,6 +83,38 @@ body {
 .tree-item-icon.collapse-icon svg.svg-icon {
   width: var(--collapse-arrow-size);
   height: var(--collapse-arrow-size);
+  transition: transform 120ms ease;
+}
+
+.tree-item-icon.collapse-icon.is-collapsed svg.svg-icon {
+  transform: rotate(-90deg);
+}
+
+#left-sidebar-content > #search-results {
+  flex: 0 1 auto;
+  max-height: 38%;
+  margin: 0 var(--sidebar-margin) .5em;
+  overflow: auto;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background: var(--background-primary);
+}
+
+#search-results[hidden] {
+  display: none;
+}
+
+#search-results .search-result .tree-item-self {
+  display: block;
+  overflow: hidden;
+  padding: 4px 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#left-sidebar-content > #file-explorer {
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 #search-wrapper .search-icon {

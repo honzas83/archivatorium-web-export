@@ -8,9 +8,11 @@ const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPOSITORY_ROOT = path.resolve(MODULE_DIR, "..");
 const FRONTMATTER_PATTERN = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/;
 const WIKILINK_PATTERN = /(!?)\[\[([^\]|#]+)(?:#[^\]|]+)?(?:\|([^\]]+))?\]\]/g;
+const MARKDOWN_LINK_PATTERN = /(!?)\[[^\]]*\]\(((?:[^()\s]|\([^)]*\))+)(?:\s+['\"][^)]*['\"])?\)/g;
 const TAG_PATTERN = /(^|[\s(])#([\p{L}\p{N}_/-]+)/gmu;
 const SEARCH_VALUE_SEPARATOR = "\u001f";
 const EXPORT_COMMIT_INTERVAL = Math.max(1, Number(process.env.EXPORT_COMMIT_INTERVAL ?? 500));
+const RECORD_FORMAT_VERSION = "2";
 
 function slugifyPath(value) {
 	return value.replaceAll(" ", "-").replaceAll(/-{2,}/g, "-").toLowerCase();
@@ -153,7 +155,8 @@ function createDirectDatabase(databasePath) {
 		CREATE INDEX IF NOT EXISTS metadata_documents_tree ON metadata_documents(show_in_tree, tree_order);
 	`);
 	const mode = database.prepare("SELECT value FROM export_state WHERE key = 'mode'").get()?.value;
-	if (mode !== "direct-markdown-spa") {
+	const recordFormat = database.prepare("SELECT value FROM export_state WHERE key = 'record_format'").get()?.value;
+	if (mode !== "direct-markdown-spa" || recordFormat !== RECORD_FORMAT_VERSION) {
 		database.exec(`
 			DELETE FROM search_documents;
 			DELETE FROM metadata_documents;
@@ -260,6 +263,7 @@ function createDirectIndexWriter(database, recordStore) {
 			removedRecords++;
 		}
 		database.prepare("INSERT OR REPLACE INTO export_state(key, value) VALUES ('mode', 'direct-markdown-spa')").run();
+		database.prepare("INSERT OR REPLACE INTO export_state(key, value) VALUES ('record_format', ?)").run(RECORD_FORMAT_VERSION);
 		database.exec("COMMIT");
 		return { writtenRecords, reusedRecords, removedRecords };
 	}
@@ -292,11 +296,19 @@ function resolveWikiTarget(rawTarget, sourcePath, documents, basenames) {
 function collectDocumentLinks(markdown, document, documents, basenames) {
 	const links = new Set();
 	const attachments = new Set();
-	for (const match of markdown.matchAll(WIKILINK_PATTERN)) {
-		const target = resolveWikiTarget(match[2], document.sourcePath, documents, basenames);
-		if (!target) continue;
+	function addTarget(rawTarget, embedded) {
+		const target = resolveWikiTarget(rawTarget, document.sourcePath, documents, basenames);
+		if (!target) return;
 		links.add(target.exportPath);
-		if (match[1]) attachments.add(target.exportPath);
+		if (embedded || !target.sourcePath.toLowerCase().endsWith(".md")) attachments.add(target.exportPath);
+	}
+	for (const match of markdown.matchAll(WIKILINK_PATTERN)) {
+		addTarget(match[2], Boolean(match[1]));
+	}
+	for (const match of markdown.matchAll(MARKDOWN_LINK_PATTERN)) {
+		const rawTarget = match[2].split("#", 1)[0].trim();
+		if (!rawTarget || /^(?:[a-z][a-z0-9+.-]*:|\/|#)/i.test(rawTarget)) continue;
+		addTarget(rawTarget, Boolean(match[1]));
 	}
 	return { links, attachments };
 }

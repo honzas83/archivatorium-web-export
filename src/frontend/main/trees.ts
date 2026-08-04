@@ -66,6 +66,7 @@ export class TreeItem
 		this._collapsed = collapse;
 		this.itemEl.classList.toggle("is-collapsed", collapse);
 		this.collapseIconEl?.classList.toggle("is-collapsed", collapse);
+		this.collapseIconEl?.setAttribute("aria-expanded", String(!collapse));
 		if (collapse) slideUp(this.childrenEl, this.collapseAnimationLength);
 		else slideDown(this.childrenEl, this.collapseAnimationLength);
 
