@@ -193,14 +193,12 @@ a:hover { color: var(--text-accent-hover); text-decoration: underline; }
 .callout[data-callout="abstract"] .callout-content { padding: .2em 1.5em 1.5em; }
 .callout[data-callout="abstract"] .callout-content > h1:first-child {
   margin: .25em 0 .65em;
-  font-family: var(--font-interface);
   font-size: 2.35em;
   font-weight: 750;
   line-height: 1.15;
 }
 .callout[data-callout="abstract"] .callout-content > p {
   margin: .7em 0;
-  font-family: var(--font-interface);
   font-size: 1.35em;
   line-height: 1.48;
 }
