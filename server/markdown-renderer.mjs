@@ -29,8 +29,6 @@ function calloutIcon(type) {
 		error: "M10.3 2.9 1.8 17a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 2.9a2 2 0 0 0-3.4 0ZM12 9v4m0 4h.01",
 		question: "M9.1 9a3 3 0 1 1 5.8 1c-.9 1.1-2.9 1.5-2.9 3.5m.01 3.5h.01M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z",
 		quote: "M10 8H6a2 2 0 0 0-2 2v4a2 2 0 0 0 2 2h2l2-4V8Zm10 0h-4a2 2 0 0 0-2 2v4a2 2 0 0 0 2 2h2l2-4V8Z",
-		abstract: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6ZM14 2v6h6M8 13h8M8 17h8M8 9h2",
-		citingthisdocument: "m12 20 9-9-3-3-9 9-1 4 4-1ZM16 7l3 3",
 	};
 	const path = paths[type] ?? "M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Zm0-11v5m0-9h.01";
 	return `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="svg-icon"><path d="${path}"/></svg>`;

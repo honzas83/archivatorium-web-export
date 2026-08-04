@@ -155,16 +155,7 @@ a:hover { color: var(--text-accent-hover); text-decoration: underline; }
 .callout[data-callout="question"], .callout[data-callout="help"], .callout[data-callout="faq"] { --callout-color: 8, 109, 221; }
 .callout[data-callout="quote"], .callout[data-callout="cite"] { --callout-color: 158, 158, 158; }
 .callout[data-callout="abstract"] {
-  --callout-color: 0, 191, 188;
-  border: 0;
-  border-radius: var(--radius-m);
-  background: rgba(var(--callout-color), .08);
-}
-.callout[data-callout="citingthisdocument"] {
-  --callout-color: 8, 109, 221;
-  border: 0;
-  border-radius: var(--radius-m);
-  background: rgba(var(--callout-color), .1);
+  background: rgba(0, 191, 188, .08);
 }
 .callout-title {
   display: flex;
@@ -184,43 +175,6 @@ a:hover { color: var(--text-accent-hover); text-decoration: underline; }
 .callout-content > :first-child { margin-top: 0; }
 .callout-content > :last-child { margin-bottom: 0; }
 .callout.is-collapsed .callout-content { display: none; }
-.callout[data-callout="abstract"] .callout-title {
-  padding: .95em 1.5em .55em;
-  font-size: 1.35em;
-  font-weight: 700;
-}
-.callout[data-callout="abstract"] .callout-icon .svg-icon { width: 1.25em; height: 1.25em; }
-.callout[data-callout="abstract"] .callout-content { padding: .2em 1.5em 1.5em; }
-.callout[data-callout="abstract"] .callout-content > h1:first-child {
-  margin: .25em 0 .65em;
-  font-size: 2.35em;
-  font-weight: 750;
-  line-height: 1.15;
-}
-.callout[data-callout="abstract"] .callout-content > p {
-  margin: .7em 0;
-  font-size: 1.35em;
-  line-height: 1.48;
-}
-.callout[data-callout="citingthisdocument"] .callout-title {
-  padding: 1em 1.5em .6em;
-  font-size: 1.3em;
-  font-weight: 700;
-}
-.callout[data-callout="citingthisdocument"] .callout-icon .svg-icon { width: 1.25em; height: 1.25em; }
-.callout[data-callout="citingthisdocument"] .callout-content { padding: .2em 1.5em 1.5em; }
-.callout[data-callout="citingthisdocument"] .callout-content > p { margin: 1.15em 0 .55em; font-family: var(--font-interface); font-size: 1.15em; font-weight: 700; }
-.callout[data-callout="citingthisdocument"] .callout-content > pre {
-  position: relative;
-  margin: 0 0 1.4em;
-  padding: 1em 1.15em;
-  border-radius: var(--radius-s);
-  background: var(--background-primary);
-  color: var(--text-normal);
-  font-size: .98em;
-  line-height: 1.55;
-  white-space: pre-wrap;
-}
 .markdown-rendered pre > button.copy-code-button {
   position: absolute;
   top: .6em;
