@@ -6,10 +6,10 @@ import path from "node:path";
 import test from "node:test";
 import { exportMarkdownSpa } from "./export-markdown-spa.mjs";
 
-test("server opens the direct SQLite export and keeps legacy corpus paths private", async () => {
+test("server indexes a vault with a missing SQLite database and keeps server data private", async () => {
 	const testRoot = await mkdtemp(path.join(tmpdir(), "obsidian-export-search-"));
-	const exportRoot = path.join(testRoot, "export");
 	const vaultRoot = path.join(testRoot, "vault");
+	const serverRoot = path.join(vaultRoot, ".archivatorium");
 	await mkdir(vaultRoot, { recursive: true });
 	await mkdir(path.join(vaultRoot, ".obsidian", "plugins", "archivatorium-web-export"), { recursive: true });
 	await mkdir(path.join(vaultRoot, "Folder"), { recursive: true });
@@ -31,11 +31,14 @@ Version one with complete searchable text, [[Target]], [Loose](Loose.md), ![[Att
 	await writeFile(path.join(vaultRoot, "Attachments", "Report.pdf"), "PDF fixture");
 	const configPath = path.join(vaultRoot, ".obsidian", "plugins", "archivatorium-web-export", "data.json");
 	await writeFile(configPath, JSON.stringify({ exportOptions: { siteName: "Test archive" } }));
-	await exportMarkdownSpa({ vaultRoot, exportRoot, configPath });
-	await writeFile(path.join(exportRoot, ".export-files.log"), "private progress");
-	await assert.rejects(stat(path.join(exportRoot, "site-lib", "corpus")));
+	await exportMarkdownSpa({ vaultRoot, configPath });
+	await rm(path.join(serverRoot, ".server-data", "corpus.sqlite"), { force: true });
+	await rm(path.join(serverRoot, ".server-data", "corpus.sqlite-wal"), { force: true });
+	await rm(path.join(serverRoot, ".server-data", "corpus.sqlite-shm"), { force: true });
+	await writeFile(path.join(serverRoot, ".export-files.log"), "private progress");
+	await assert.rejects(stat(path.join(serverRoot, ".server-data", "corpus.sqlite")));
+	await assert.rejects(stat(path.join(serverRoot, "site-lib", "corpus")));
 
-	process.env.EXPORT_ROOT = exportRoot;
 	process.env.VAULT_ROOT = vaultRoot;
 	process.env.PUBLIC_ARCHIVE_ROOT = "https://archive.example/";
 	const { createShoppingBasketServer } = await import(
@@ -59,6 +62,7 @@ Version one with complete searchable text, [[Target]], [Loose](Loose.md), ![[Att
 		const searchResult = await searchResponse.json();
 		assert.equal(searchResult.items.length, 1);
 		assert.equal(searchResult.items[0].sourcePath, "Folder/Document.md");
+		assert.equal((await stat(path.join(serverRoot, ".server-data", "corpus.sqlite"))).isFile(), true);
 
 		const multiwordResponse = await fetch(`${baseURL}/api/search`, {
 			method: "POST",

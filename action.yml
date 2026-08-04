@@ -1,5 +1,5 @@
-name: "Export Archivatorium vault to HTML"
-description: "Exports an Archivatorium vault to a searchable HTML archive"
+name: "Prepare Archivatorium vault"
+description: "Generates the server-rendered Archivatorium application inside an Obsidian vault"
 
 inputs:
   vault:
@@ -16,7 +16,7 @@ inputs:
     
 outputs:
   output:
-    description: "Path to the output folder"
+    description: "Path to the generated hidden server directory"
     value: ${{ steps.run-docker.outputs.output }}
     
 runs:
@@ -30,17 +30,17 @@ runs:
       run: |
         set +e
 
-        mkdir -p ./.output
-
         if [ -z "${{ inputs.config }}" ]; then
-          docker run --rm -v ${{ inputs.vault }}:/vault -v ./.output:/output ghcr.io/honzas83/archivatorium-web-export:${{ inputs.version }} >> ./.log.txt
+          docker run --rm -v "${{ inputs.vault }}:/vault" ghcr.io/honzas83/archivatorium-web-export:${{ inputs.version }} >> ./.log.txt
         else
-          docker run --rm -v ${{ inputs.vault }}:/vault -v ${{ inputs.config }}:/config.json -v ./.output:/output ghcr.io/honzas83/archivatorium-web-export:${{ inputs.version }} >> ./.log.txt
+          docker run --rm -v "${{ inputs.vault }}:/vault" -v "${{ inputs.config }}:/config.json:ro" ghcr.io/honzas83/archivatorium-web-export:${{ inputs.version }} >> ./.log.txt
         fi
+        status=$?
 
         cat ./.log.txt
+        echo "output=${{ inputs.vault }}/.archivatorium" >> "$GITHUB_OUTPUT"
 
-        if [ $? -eq 137 ]; then
+        if [ "$status" -eq 137 ]; then
           exit 0
-          echo "output=./.output" >> $GITHUB_OUTPUT
         fi
+        exit "$status"

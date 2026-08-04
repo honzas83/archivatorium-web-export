@@ -24,7 +24,7 @@ FROM debian:trixie AS run
 
 # Set image parameters
 ARG DEBIAN_FRONTEND=noninteractive
-VOLUME [ "/vault", "/output", "/config.json" ]
+VOLUME [ "/vault", "/config.json" ]
 ENV TZ=Etc/UTC
 
 # Required packages
@@ -49,7 +49,6 @@ RUN apt update \
 
 # Set up the vault
 RUN mkdir -p /root/.config/obsidian \
-  && mkdir /output \
   && echo '{"vaults":{"94349b4f2b2e057a":{"path":"/vault","ts":1715257568671,"open":true}}}' > /root/.config/obsidian/obsidian.json
 
 # Install patcher

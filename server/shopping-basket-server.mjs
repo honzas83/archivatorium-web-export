@@ -5,21 +5,20 @@ import { readFile, readdir, stat } from "node:fs/promises";
 import { DatabaseSync } from "node:sqlite";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { exportMarkdownSpa } from "./export-markdown-spa.mjs";
 import { MarkdownDocumentRenderer } from "./markdown-renderer.mjs";
+import { resolveCorpusDatabasePath, resolveServerRoot, resolveVaultRoot } from "./vault-layout.mjs";
 
 const HOST = process.env.HOST ?? "127.0.0.1";
 const PORT = Number(process.env.PORT ?? 8000);
-const VAULT_ROOT = process.env.VAULT_ROOT
-	? path.resolve(process.env.VAULT_ROOT)
-	: "";
-const EXPORT_ROOT = process.env.EXPORT_ROOT
-	? path.resolve(process.env.EXPORT_ROOT)
-	: process.cwd();
+const IS_MAIN = process.argv[1] === fileURLToPath(import.meta.url);
+const VAULT_ROOT = resolveVaultRoot(process.env.VAULT_ROOT || (IS_MAIN ? process.argv[2] : ""));
+const SERVER_ROOT = resolveServerRoot(VAULT_ROOT);
 const PUBLIC_ARCHIVE_ROOT = process.env.PUBLIC_ARCHIVE_ROOT ?? "";
 const MAX_REQUEST_BYTES = Number(process.env.MAX_CHECKOUT_BYTES ?? 1_000_000);
 const MAX_CHECKOUT_ITEMS = Number(process.env.MAX_CHECKOUT_ITEMS ?? 5000);
-const SEARCH_DATA_ROOT = path.join(EXPORT_ROOT, ".server-data");
-const CORPUS_DATABASE_PATH = path.join(SEARCH_DATA_ROOT, "corpus.sqlite");
+const SEARCH_DATA_ROOT = path.join(SERVER_ROOT, ".server-data");
+const CORPUS_DATABASE_PATH = resolveCorpusDatabasePath(VAULT_ROOT);
 const SEARCH_VALUE_SEPARATOR = "\u001f";
 const PAGE_CACHE_ENTRIES = Math.max(1, Number(process.env.PAGE_CACHE_ENTRIES ?? 256));
 let corpusDatabasePromise;
@@ -49,10 +48,6 @@ const contentTypes = new Map([
 ]);
 
 function requireConfig() {
-	if (!VAULT_ROOT) {
-		throw new Error("VAULT_ROOT is required.");
-	}
-
 	if (!PUBLIC_ARCHIVE_ROOT) {
 		throw new Error("PUBLIC_ARCHIVE_ROOT is required.");
 	}
@@ -117,8 +112,13 @@ function splitSearchValues(value) {
 
 async function initializeCorpusDatabase() {
 	corpusStatus.state = "opening";
-	if (!(await stat(CORPUS_DATABASE_PATH)).isFile()) {
-		throw new Error(`Direct SQLite export not found: ${CORPUS_DATABASE_PATH}`);
+	try {
+		if (!(await stat(CORPUS_DATABASE_PATH)).isFile()) throw new Error(`Corpus path is not a file: ${CORPUS_DATABASE_PATH}`);
+	} catch (error) {
+		if (error?.code !== "ENOENT") throw error;
+		corpusStatus.state = "indexing";
+		console.log(`[companion-sqlite] database missing; indexing vault into ${CORPUS_DATABASE_PATH}`);
+		await exportMarkdownSpa({ vaultRoot: VAULT_ROOT, writeApplication: false });
 	}
 	const database = new DatabaseSync(CORPUS_DATABASE_PATH);
 	try {
@@ -179,7 +179,7 @@ async function handleMetadataBootstrap(_request, response) {
 }
 
 async function getAppBootstrap() {
-	const metadata = JSON.parse(await readFile(path.join(EXPORT_ROOT, "site-lib", "metadata.json"), "utf8"));
+	const metadata = JSON.parse(await readFile(path.join(SERVER_ROOT, "site-lib", "metadata.json"), "utf8"));
 	const database = await getCorpusDatabase();
 	const rows = database.prepare(
 		"SELECT inline_tags, frontmatter_tags FROM metadata_documents WHERE kind = 'webpage'"
@@ -209,7 +209,7 @@ function normalizeNavigationParent(value) {
 }
 
 async function useDocumentTitlesInNavigation() {
-	const metadata = JSON.parse(await readFile(path.join(EXPORT_ROOT, "site-lib", "metadata.json"), "utf8"));
+	const metadata = JSON.parse(await readFile(path.join(SERVER_ROOT, "site-lib", "metadata.json"), "utf8"));
 	return metadata.featureOptions?.fileNavigation?.showDocumentTitles === true;
 }
 
@@ -468,7 +468,7 @@ async function readJSONBody(request) {
 }
 
 async function loadMetadata() {
-	const metadataRoot = path.join(EXPORT_ROOT, "site-lib");
+	const metadataRoot = path.join(SERVER_ROOT, "site-lib");
 	const metadataPath = path.join(metadataRoot, "metadata.json");
 	const raw = await readFile(metadataPath, "utf8");
 	const metadata = JSON.parse(raw);
@@ -1092,7 +1092,7 @@ async function serveStatic(request, response) {
 			"SELECT kind, type, data FROM metadata_documents WHERE export_path = ?"
 		).get(requestedExportPath);
 		if (document?.kind === "webpage" && document.type === "markdown" && requestedExportPath !== "index.html") {
-			const shellPath = path.join(EXPORT_ROOT, "index.html");
+			const shellPath = path.join(SERVER_ROOT, "index.html");
 			const shellStat = await stat(shellPath);
 			response.writeHead(200, {
 				"Content-Type": "text/html; charset=utf-8",
@@ -1126,8 +1126,8 @@ async function serveStatic(request, response) {
 		console.error("SPA shell lookup failed:", error);
 	}
 
-	const absolutePath = path.resolve(EXPORT_ROOT, `.${pathname}`);
-	if (!isPathInside(EXPORT_ROOT, absolutePath)) {
+	const absolutePath = path.resolve(SERVER_ROOT, `.${pathname}`);
+	if (!isPathInside(SERVER_ROOT, absolutePath)) {
 		send(response, 403, "Forbidden", { "Content-Type": "text/plain; charset=utf-8" });
 		return;
 	}
@@ -1163,7 +1163,7 @@ async function serveStatic(request, response) {
 async function resolveMetadataRedirect(pathname) {
 	try {
 		const bootstrap = JSON.parse(await readFile(
-			path.join(EXPORT_ROOT, "site-lib", "metadata.json"),
+			path.join(SERVER_ROOT, "site-lib", "metadata.json"),
 			"utf8"
 		));
 		const metadataValue = normalizeMetadataValue(pathname.replace(/^\/+/, "").replace(/\.html$/i, ""));
@@ -1243,14 +1243,16 @@ export function createShoppingBasketServer() {
 	});
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
-getCorpusDatabase().catch((error) => {
-	console.error("Direct SQLite initialization failed:", error);
-});
-	const server = createShoppingBasketServer();
-	server.listen(PORT, HOST, () => {
-		console.log(`Shopping basket server listening on http://${HOST}:${PORT}`);
-		console.log(`Serving export from ${EXPORT_ROOT}`);
-		console.log(`Vault configured for checkout from ${VAULT_ROOT}`);
+if (IS_MAIN) {
+	getCorpusDatabase().then(() => {
+		const server = createShoppingBasketServer();
+		server.listen(PORT, HOST, () => {
+			console.log(`Archivatorium server listening on http://${HOST}:${PORT}`);
+			console.log(`Serving vault ${VAULT_ROOT}`);
+			console.log(`Using generated application from ${SERVER_ROOT}`);
+		});
+	}).catch((error) => {
+		console.error("Direct SQLite initialization failed:", error);
+		process.exitCode = 1;
 	});
 }

@@ -1,13 +1,10 @@
-import { ButtonComponent, Modal, Setting, TFile } from 'obsidian';
+import { Modal, Setting, TFile } from 'obsidian';
 import { Utils } from 'src/plugin/utils/utils';
-import HTMLExportPlugin from 'src/plugin/main';
 import { ExportPreset, Settings, SettingsPage } from './settings';
 import { FilePickerTree } from 'src/plugin/features/file-picker';
 import { Path } from 'src/plugin/utils/path';
-import { FileDialogs } from 'src/plugin/utils/file-dialogs';
-import { createFileInput, createToggle } from './settings-components';
+import { createToggle } from './settings-components';
 import { Website } from 'src/plugin/website/website';
-import { Index } from 'src/plugin/website';
 import { i18n } from '../translations/language';
 
 export interface ExportInfo
@@ -174,10 +171,9 @@ export class ExportModal extends Modal
 				.setButtonText(lang.purgeExport.clearCache)
 				.onClick(async () =>
 				{
-					const path = new Path(exportPathInput.textInput.getValue());
+					const path = new Path(Settings.exportOptions.exportPath);
 					const website = await new Website(path).load();
 					await website.index.clearCache();
-					onChanged(path);
 					confirmModal.close();
 				}));
 			})).setDesc(lang.purgeExport.description);
@@ -186,92 +182,15 @@ export class ExportModal extends Modal
 
 		createToggle(contentEl, lang.openAfterExport, () => Settings.openAfterExport, (value) => Settings.openAfterExport = value);
 
-		let exportButton : ButtonComponent | undefined = undefined;
-
-		function setExportDisabled(disabled: boolean)
-		{
-			if(exportButton) 
-			{
-				exportButton.setDisabled(disabled);
-				if (exportButton.disabled) exportButton.buttonEl.style.opacity = "0.5";
-				else exportButton.buttonEl.style.opacity = "1";
-			}
-		}
-
-		const validatePath = (path: Path) => path.validate(
-		{
-			allowEmpty: false,
-			allowRelative: false,
-			allowAbsolute: true,
-			allowDirectories: true,
-			allowTildeHomeDirectory: true,
-			requireExists: true
-		});
-
-		const onChangedValidate = (path: Path) => (!validatePath(path).valid) ? setExportDisabled(true) : setExportDisabled(false);
-
-		const onChanged = async (path: Path) =>
-		{
-			onChangedValidate(path);
-			const valid = validatePath(path);
-			this.validPath = valid.valid;
-			if (!valid)
-			{
-				exportDescription.setText("");
-				return;
-			}
-
-			const website = new Website(path);
-			const index = new Index();
-			await index.load(website, website.exportOptions);
-
-			if (!index.oldWebsiteData)
-			{
-				exportDescription.setText(lang.currentSite.noSite);
-				return;
-			}
-
-			if (index.oldWebsiteData.pluginVersion != HTMLExportPlugin.pluginVersion)
-			{
-				exportDescription.setText(lang.currentSite.oldSite);
-				return;
-			}
-
-			const lastExportDate = new Date(index.oldWebsiteData.modifiedTime).toLocaleString();
-			const lastExportFiles = index.oldWebsiteData.allFiles?.length;
-			const lastExportName = index.oldWebsiteData.siteName;
-
-			exportDescription.setText(`${lang.currentSite.pathContainsSite}: "${lastExportName}"\n${lang.currentSite.fileCount}: ${lastExportFiles}\n${lang.currentSite.lastExported}: ${lastExportDate}`);
-			exportDescription.style.whiteSpace = "pre-wrap";
-		}
-
-		const exportPathInput = createFileInput(contentEl, () => Settings.exportOptions.exportPath, (value) => Settings.exportOptions.exportPath = value,
-		{
-			name: '',
-			description: '',
-			placeholder: i18n.pathInputPlaceholder,
-			defaultPath: FileDialogs.idealDefaultPath(),
-			pickFolder: true,
-			validation: validatePath,
-			onChanged: onChanged
-		});
-
-		const { fileInput } = exportPathInput;
-		
-		fileInput.addButton((button) => {
-			exportButton = button;
-			setExportDisabled(!this.validPath);
+		new Setting(contentEl)
+			.setDesc("Server files are stored in .archivatorium inside this vault.")
+			.addButton((button) => {
 			button.setButtonText(lang.exportButton).onClick(async () => 
 			{
 				this.canceled = false;
 				this.close();
 			});
 		});
-
-		// add description of export at this path
-		const exportDescription = contentEl.createEl('div', { text: 'Loading site at path...', cls: 'setting-item-description'});
-		exportDescription.style.marginBottom = "1em";
-		onChanged(new Path(exportPathInput.textInput.getValue()));
 
 		this.filePickerModalEl.style.height = this.modalEl.clientHeight * 2 + "px";
 

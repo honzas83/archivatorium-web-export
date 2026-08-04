@@ -6,7 +6,6 @@ services:
 
     volumes:
       - ./vault:/vault
-      - ./output:/output
-      - ./data.json:/config.json
+      - ./data.json:/config.json:ro
 
     dns: 8.8.8.8

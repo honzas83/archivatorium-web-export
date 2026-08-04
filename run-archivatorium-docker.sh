@@ -8,11 +8,14 @@ IMAGE_NAME="${EXPORT_IMAGE:-archivatorium-web-export:local}"
 CONTAINER_NAME="${EXPORT_CONTAINER_NAME:-archivatorium-web-export}"
 EXPORT_MEMORY="${EXPORT_MEMORY:-12g}"
 EXPORT_MEMORY_SWAP="${EXPORT_MEMORY_SWAP:-16g}"
-EXPORT_RESTART_AFTER_RENDERED_MB="${EXPORT_RESTART_AFTER_RENDERED_MB:-10}"
+EXPORT_RESTART_AFTER_RENDERED_MB="${EXPORT_RESTART_AFTER_RENDERED_MB:-0}"
 
 VAULT_PATH="${1:-${EXPORT_VAULT:-}}"
-OUTPUT_PATH="${2:-${EXPORT_OUTPUT:-${VAULT_PATH:+${VAULT_PATH}.html}}}"
-CONFIG_PATH="${3:-${EXPORT_CONFIG:-}}"
+CONFIG_PATH="${2:-${EXPORT_CONFIG:-}}"
+CONFIG_WAS_EXPLICIT=0
+if [[ -n "${2:-${EXPORT_CONFIG:-}}" ]]; then
+  CONFIG_WAS_EXPLICIT=1
+fi
 
 if [[ -z "$VAULT_PATH" ]]; then
   echo "Pass the vault path as the first argument or set EXPORT_VAULT." >&2
@@ -21,10 +24,6 @@ fi
 
 if [[ -z "$CONFIG_PATH" ]]; then
   CONFIG_PATH="$VAULT_PATH/.obsidian/plugins/archivatorium-web-export/data.json"
-fi
-
-if [[ -e "$CONFIG_PATH" ]]; then
-  CONFIG_PATH="$(realpath "$CONFIG_PATH")"
 fi
 
 if [[ ! -d "$REPO_ROOT" ]]; then
@@ -38,12 +37,14 @@ if [[ ! -d "$VAULT_PATH" ]]; then
 fi
 VAULT_PATH="$(realpath "$VAULT_PATH")"
 
-mkdir -p "$OUTPUT_PATH"
-OUTPUT_PATH="$(realpath "$OUTPUT_PATH")"
-
-if [[ ! -f "$CONFIG_PATH" ]]; then
+if [[ ! -f "$CONFIG_PATH" && "$CONFIG_WAS_EXPLICIT" -eq 1 ]]; then
   echo "Configuration file not found: $CONFIG_PATH" >&2
   exit 1
+fi
+if [[ -f "$CONFIG_PATH" ]]; then
+  CONFIG_PATH="$(realpath "$CONFIG_PATH")"
+else
+  CONFIG_PATH=""
 fi
 
 if ! [[ "$EXPORT_RESTART_AFTER_RENDERED_MB" =~ ^[0-9]+$ ]]; then
@@ -85,13 +86,14 @@ docker_args=(
   --env EXPORT_ENTIRE_VAULT=1
   --env "EXPORT_RESTART_AFTER_RENDERED_MB=$EXPORT_RESTART_AFTER_RENDERED_MB"
   --volume "$VAULT_PATH:/vault"
-  --volume "$OUTPUT_PATH:/output"
-  --volume "$CONFIG_PATH:/config.json:ro"
-  "$IMAGE_NAME"
 )
+if [[ -n "$CONFIG_PATH" ]]; then
+  docker_args+=(--volume "$CONFIG_PATH:/config.json:ro")
+fi
+docker_args+=("$IMAGE_NAME")
 
 echo "Exporting vault: $VAULT_PATH"
-echo "Writing output:  $OUTPUT_PATH"
+echo "Server root:      $VAULT_PATH/.archivatorium"
 echo "Container name:   $CONTAINER_NAME"
 echo "Container memory: $EXPORT_MEMORY (memory+swap: $EXPORT_MEMORY_SWAP)"
 if [[ "$EXPORT_RESTART_AFTER_RENDERED_MB" -gt 0 ]]; then

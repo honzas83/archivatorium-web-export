@@ -4,6 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { findObsidianTags, normalizeFrontmatterTags } from "./obsidian-tags.mjs";
+import { resolveServerRoot, resolveVaultRoot, SERVER_DIRECTORY_NAME } from "./vault-layout.mjs";
 
 const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPOSITORY_ROOT = path.resolve(MODULE_DIR, "..");
@@ -118,7 +119,7 @@ async function walkFiles(vaultRoot, relative = "") {
 	const entries = await readdir(path.join(vaultRoot, relative), { withFileTypes: true });
 	const files = [];
 	for (const entry of entries) {
-		if (entry.name === ".obsidian" || entry.name === ".trash") continue;
+		if (entry.name === ".obsidian" || entry.name === ".trash" || entry.name === SERVER_DIRECTORY_NAME) continue;
 		const sourcePath = relative ? `${relative}/${entry.name}` : entry.name;
 		if (entry.isDirectory()) files.push(...await walkFiles(vaultRoot, sourcePath));
 		else if (entry.isFile()) files.push(sourcePath);
@@ -382,10 +383,9 @@ async function writeAssets(exportRoot) {
 	]);
 }
 
-export async function exportMarkdownSpa({ vaultRoot, exportRoot, configPath } = {}) {
-	if (!vaultRoot || !exportRoot) throw new Error("Usage: export-markdown-spa.mjs <vault-path> <output-path> [config-path]");
-	vaultRoot = path.resolve(vaultRoot);
-	exportRoot = path.resolve(exportRoot);
+export async function exportMarkdownSpa({ vaultRoot, configPath, writeApplication = true } = {}) {
+	vaultRoot = resolveVaultRoot(vaultRoot);
+	const exportRoot = resolveServerRoot(vaultRoot);
 	const settingsPath = configPath ?? path.join(vaultRoot, ".obsidian/plugins/archivatorium-web-export/data.json");
 	let config = {};
 	try {
@@ -527,22 +527,24 @@ export async function exportMarkdownSpa({ vaultRoot, exportRoot, configPath } = 
 	database.close();
 	await rm(path.join(exportRoot, "site-lib", "corpus"), { recursive: true, force: true });
 
-	const siteName = options.siteName || path.basename(vaultRoot);
-	await writeAssets(exportRoot);
-	await writeFile(path.join(exportRoot, "index.html"), createShell(siteName));
-	await writeFile(path.join(exportRoot, "site-lib", "metadata.json"), JSON.stringify({
-		createdTime: Date.now(), modifiedTime: Date.now(), siteName, vaultName: path.basename(vaultRoot),
-		exportRoot: "", baseURL: "", pluginVersion: "server-markdown-spa",
-		themeName: "", bodyClasses: "publish css-settings-manager show-inline-title show-ribbon is-focused", hasFavicon: true, serverMetadata: true,
-		featureOptions: featureOptions(options),
-	}));
+	if (writeApplication) {
+		const siteName = options.siteName || path.basename(vaultRoot);
+		await writeAssets(exportRoot);
+		await writeFile(path.join(exportRoot, "index.html"), createShell(siteName));
+		await writeFile(path.join(exportRoot, "site-lib", "metadata.json"), JSON.stringify({
+			createdTime: Date.now(), modifiedTime: Date.now(), siteName, vaultName: path.basename(vaultRoot),
+			exportRoot: "", baseURL: "", pluginVersion: "server-markdown-spa",
+			themeName: "", bodyClasses: "publish css-settings-manager show-inline-title show-ribbon is-focused", hasFavicon: true, serverMetadata: true,
+			featureOptions: featureOptions(options),
+		}));
+	}
 	console.log(`[node-export] indexed ${result.writtenRecords}, reused ${result.reusedRecords}, and removed ${result.removedRecords} SQLite records (${sourcePaths.length} documents, ${attachmentRecords.size} referenced attachments)`);
-	return { ...result, documents: sourcePaths.length, attachments: attachmentRecords.size };
+	return { ...result, documents: sourcePaths.length, attachments: attachmentRecords.size, serverRoot: exportRoot };
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-	const [vaultRoot, exportRoot, configPath] = process.argv.slice(2);
-	exportMarkdownSpa({ vaultRoot, exportRoot, configPath }).catch((error) => {
+	const [vaultRoot, configPath] = process.argv.slice(2);
+	exportMarkdownSpa({ vaultRoot, configPath }).catch((error) => {
 		console.error("Node export failed:", error);
 		process.exitCode = 1;
 	});

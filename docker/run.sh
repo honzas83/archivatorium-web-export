@@ -2,6 +2,8 @@
 
 PLUGIN_DIR="/vault/.obsidian/plugins/archivatorium-web-export"
 mkdir -p "$PLUGIN_DIR"
+SERVER_DIR="/vault/.archivatorium"
+mkdir -p "$SERVER_DIR"
 
 # Always run the plugin bundled into this image while preserving vault settings.
 cp /plugin/main.js /plugin/manifest.json /plugin/styles.css "$PLUGIN_DIR/"
@@ -29,7 +31,7 @@ if ! [[ "$RESTART_AFTER_RENDERED_MB" =~ ^[0-9]+$ ]]; then
 fi
 RESTART_AFTER_RENDERED_BYTES=$((RESTART_AFTER_RENDERED_MB * 1024 * 1024))
 
-STATUS_FILE="/output/.docker-export-status.json"
+STATUS_FILE="$SERVER_DIR/.docker-export-status.json"
 attempt=0
 
 cleanup_previous_attempt() {
@@ -57,7 +59,7 @@ while true; do
   echo "Starting export attempt ${attempt}"
   printf '{"status":"starting","attempt":%d}\n' "$attempt" > "$STATUS_FILE"
   LOG_FILE="$(mktemp /tmp/archivatorium-export.XXXXXX.log)"
-  FILE_LOG="/output/.export-files.log"
+  FILE_LOG="$SERVER_DIR/.export-files.log"
   : > "$FILE_LOG"
   tail -n 0 -F "$FILE_LOG" &
   FILE_LOG_TAIL_PID=$!
@@ -124,8 +126,8 @@ while true; do
       break
     fi
     if [[ "$SCRIPT_STARTED" == true ]] && [[ ! -s "$FILE_LOG" ]] && (( SECONDS - LAST_PROGRESS_LOG >= 15 )); then
-      if [[ -f /output/.export-progress.json ]]; then
-        PROGRESS_SUMMARY=$(sed -n 's/.*"stage":"\([^"]*\)".*"completed":\([0-9]*\).*"total":\([0-9]*\).*/\1 \2 \3/p' /output/.export-progress.json)
+      if [[ -f "$SERVER_DIR/.export-progress.json" ]]; then
+        PROGRESS_SUMMARY=$(sed -n 's/.*"stage":"\([^"]*\)".*"completed":\([0-9]*\).*"total":\([0-9]*\).*/\1 \2 \3/p' "$SERVER_DIR/.export-progress.json")
         echo "[docker-progress] ${PROGRESS_SUMMARY:-progress file is being updated}"
       else
         echo "[docker-progress] script is running; waiting for export progress files."

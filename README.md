@@ -115,8 +115,9 @@ artifacts but do not automatically build or publish a Docker image.
 ## Docker CLI export
 
 The optional Docker image runs Obsidian with a virtual display, injects the
-bundled plugin, and starts an export without opening the desktop interface.
-Vault and export data remain on the local machine.
+bundled plugin, and prepares the server-rendered application without opening
+the desktop interface. All generated files stay in the hidden
+`.archivatorium` directory inside the mounted vault.
 
 Build the current source as a local image:
 
@@ -128,17 +129,20 @@ Run a complete export with an existing plugin configuration:
 
 ```bash
 VAULT=/path/to/archivatorium-vault
-OUTPUT=/path/to/export
 CONFIG=/path/to/plugin-data.json
-
-mkdir -p "$OUTPUT"
 
 docker run --rm \
   -e EXPORT_ENTIRE_VAULT=1 \
   -v "${VAULT}:/vault" \
-  -v "${OUTPUT}:/output" \
   -v "${CONFIG}:/config.json:ro" \
   archivatorium-web-export:local
+```
+
+The repository wrapper accepts the vault and an optional configuration file;
+there is no output-directory argument:
+
+```bash
+./run-archivatorium-docker.sh /path/to/archivatorium-vault [/path/to/plugin-data.json]
 ```
 
 The mounted configuration has the same structure as the plugin's `data.json`.
@@ -150,9 +154,9 @@ The runner refreshes `main.js`, `manifest.json`, and `styles.css` inside
 `.obsidian/plugins/archivatorium-web-export/` for every run. The vault must be
 writable because Obsidian and the plugin update files under `.obsidian`.
 
-Reuse the same output directory for later incremental exports. The Docker
+Reuse the same vault for later incremental exports. The Docker
 runner retries an Electron `Renderer process killed` crash indefinitely;
-completed pages are reused on the next attempt. Set
+unchanged Markdown corpus records are reused on the next attempt. Set
 `EXPORT_RENDERER_RETRY_DELAY_SECONDS` to adjust the default 20-second wait
 between attempts. Each retry also terminates orphaned Obsidian processes and
 releases its remote-debugging port before starting again. Stop a running export
@@ -170,21 +174,32 @@ file name from `.export-files.log` to the console.
 
 ## Companion server
 
-Hosted exports use the generated `server/shopping-basket-server.mjs` as their
-web server. It serves generated HTML, PDFs, assets, full-text search, metadata,
-redirects, and shopping-basket checkout from one process. The server is copied
-into every generated website so the deployed server and export remain
-compatible.
+The plugin writes the SPA shell, assets, and server modules under
+`<vault>/.archivatorium`. It does not create a second HTML export tree or
+static HTML pages for individual notes. The companion process renders Markdown
+on demand and serves attachments directly from the vault.
+
+When `.archivatorium/.server-data/corpus.sqlite` is missing, server startup
+indexes the vault before opening the listening port. Later page rendering uses
+the source Markdown directly and validates its cache by source `mtime` and
+size.
 
 Run it with Node.js 24:
 
 ```bash
-VAULT_ROOT=/srv/archivatorium-vault \
-EXPORT_ROOT=/srv/archivatorium-export \
+VAULT=/srv/archivatorium-vault
 PUBLIC_ARCHIVE_ROOT=https://archive.example.org/ \
 HOST=127.0.0.1 \
 PORT=8000 \
-node server/shopping-basket-server.mjs
+node server/shopping-basket-server.mjs "$VAULT"
+```
+
+The generated copy can be run from the vault after installing its single
+runtime dependency:
+
+```bash
+npm install --prefix "$VAULT/.archivatorium/server"
+node "$VAULT/.archivatorium/server/shopping-basket-server.mjs" "$VAULT"
 ```
 
 Place an authenticating reverse proxy in front of the checkout endpoint. The
@@ -195,7 +210,8 @@ to an untrusted network.
 ## Data and network disclosure
 
 - Exporting reads selected files and metadata from the local vault and writes
-  the generated website to the destination chosen by the user.
+  generated application data under the vault's hidden `.archivatorium`
+  directory.
 - Remote emoji or other explicitly referenced assets may be downloaded when
   required by exported content and the selected export options.
 - Static exports do not send vault contents to Archivatorium, the project

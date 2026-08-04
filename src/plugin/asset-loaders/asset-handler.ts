@@ -8,6 +8,10 @@ import themeLoadJS from "src/assets/theme-load.txt.js";
 
 import minisearchJS from "src/assets/minisearch.txt.js";
 import shoppingBasketServerJS from "../../../server/shopping-basket-server.mjs?raw";
+import markdownRendererJS from "../../../server/markdown-renderer.mjs?raw";
+import markdownSpaExporterJS from "../../../server/export-markdown-spa.mjs?raw";
+import obsidianTagsJS from "../../../server/obsidian-tags.mjs?raw";
+import vaultLayoutJS from "../../../server/vault-layout.mjs?raw";
 import shoppingBasketServerPackageJSON from "src/assets/shopping-basket-server-package.txt";
 
 import { Path } from "src/plugin/utils/path.js";
@@ -107,6 +111,10 @@ export class AssetHandler
 	public static deferredJS: AssetLoader;
 	public static themeLoadJS: AssetLoader;
 	public static shoppingBasketServerJS: AssetLoader;
+	public static markdownRendererJS: AssetLoader;
+	public static markdownSpaExporterJS: AssetLoader;
+	public static obsidianTagsJS: AssetLoader;
+	public static vaultLayoutJS: AssetLoader;
 	public static shoppingBasketServerPackageJSON: AssetLoader;
 	 
 	// other
@@ -144,6 +152,10 @@ export class AssetHandler
 		this.deferredJS = new AssetLoader("deferred.js", deferredJS, null, AssetType.Script, InlinePolicy.InlineHead, true, Mutability.Static, LoadMethod.Defer, -1000);
 		this.themeLoadJS = new AssetLoader("theme-load.js", themeLoadJS, null, AssetType.Script, InlinePolicy.Inline, true, Mutability.Static, LoadMethod.Defer);
 		this.shoppingBasketServerJS = new AssetLoader("server/shopping-basket-server.mjs", shoppingBasketServerJS, null, AssetType.Root, InlinePolicy.Download, false, Mutability.Static);
+		this.markdownRendererJS = new AssetLoader("server/markdown-renderer.mjs", markdownRendererJS, null, AssetType.Root, InlinePolicy.Download, false, Mutability.Static);
+		this.markdownSpaExporterJS = new AssetLoader("server/export-markdown-spa.mjs", markdownSpaExporterJS, null, AssetType.Root, InlinePolicy.Download, false, Mutability.Static);
+		this.obsidianTagsJS = new AssetLoader("server/obsidian-tags.mjs", obsidianTagsJS, null, AssetType.Root, InlinePolicy.Download, false, Mutability.Static);
+		this.vaultLayoutJS = new AssetLoader("server/vault-layout.mjs", vaultLayoutJS, null, AssetType.Root, InlinePolicy.Download, false, Mutability.Static);
 		this.shoppingBasketServerPackageJSON = new AssetLoader("server/package.json", shoppingBasketServerPackageJSON, null, AssetType.Root, InlinePolicy.Download, false, Mutability.Static);
 		this.favicon = new Favicon();
 		this.customHeadContent = new CustomHeadContent();

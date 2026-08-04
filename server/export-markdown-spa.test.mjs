@@ -9,7 +9,7 @@ import { exportMarkdownSpa } from "./export-markdown-spa.mjs";
 test("pure Node export creates a compact SPA corpus without Obsidian", async () => {
 	const root = await mkdtemp(path.join(tmpdir(), "markdown-spa-export-"));
 	const vault = path.join(root, "vault");
-	const output = path.join(root, "output");
+	const output = path.join(vault, ".archivatorium");
 	const config = path.join(root, "config.json");
 	await mkdir(path.join(vault, "Folder"), { recursive: true });
 	await writeFile(path.join(vault, "Folder", "Source.md"), `---
@@ -47,13 +47,15 @@ Inline code \`#CodeTag\` and escaped \\#EscapedTag are not tags.
 	await writeFile(config, JSON.stringify({ exportOptions: { siteName: "Fixture archive" } }));
 
 	try {
-		const defaultOutput = path.join(root, "default-output");
-		await exportMarkdownSpa({ vaultRoot: vault, exportRoot: defaultOutput });
-		const defaultMetadata = JSON.parse(await readFile(path.join(defaultOutput, "site-lib", "metadata.json"), "utf8"));
+		await exportMarkdownSpa({ vaultRoot: vault });
+		const defaultMetadata = JSON.parse(await readFile(path.join(output, "site-lib", "metadata.json"), "utf8"));
 		assert.equal(defaultMetadata.siteName, "vault");
 		assert.equal(defaultMetadata.featureOptions.fileNavigation.showDocumentTitles, false);
+		await rm(output, { recursive: true, force: true });
+		await mkdir(output, { recursive: true });
+		await writeFile(path.join(output, "Must-not-be-indexed.md"), "# Internal output");
 
-		const firstExport = await exportMarkdownSpa({ vaultRoot: vault, exportRoot: output, configPath: config });
+		const firstExport = await exportMarkdownSpa({ vaultRoot: vault, configPath: config });
 		assert.equal(firstExport.writtenRecords, 3);
 		const database = new DatabaseSync(path.join(output, ".server-data", "corpus.sqlite"));
 		const records = database.prepare("SELECT payload FROM source_records").all().map((row) => JSON.parse(row.payload));
@@ -94,16 +96,16 @@ Inline code \`#CodeTag\` and escaped \\#EscapedTag are not tags.
 			siteName: "Fixture archive",
 			fileNavigationOptions: { showDocumentTitles: true },
 		} }));
-		await exportMarkdownSpa({ vaultRoot: vault, exportRoot: output, configPath: config });
+		await exportMarkdownSpa({ vaultRoot: vault, configPath: config });
 		const titledMetadata = JSON.parse(await readFile(path.join(output, "site-lib", "metadata.json"), "utf8"));
 		assert.equal(titledMetadata.featureOptions.fileNavigation.showDocumentTitles, true);
 
-		const unchangedExport = await exportMarkdownSpa({ vaultRoot: vault, exportRoot: output, configPath: config });
+		const unchangedExport = await exportMarkdownSpa({ vaultRoot: vault, configPath: config });
 		assert.equal(unchangedExport.writtenRecords, 0);
 		assert.equal(unchangedExport.reusedRecords, 3);
 
 		await writeFile(path.join(vault, "Folder", "Target.md"), "# Target\n\nChanged target text.");
-		const changedExport = await exportMarkdownSpa({ vaultRoot: vault, exportRoot: output, configPath: config });
+		const changedExport = await exportMarkdownSpa({ vaultRoot: vault, configPath: config });
 		assert.equal(changedExport.writtenRecords, 1);
 		assert.equal(changedExport.reusedRecords, 2);
 	} finally {

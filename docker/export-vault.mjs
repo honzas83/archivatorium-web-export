@@ -1,6 +1,6 @@
 console.log('Starting export script...');
 
-const statusPath = '/output/.docker-export-status.json';
+const statusPath = '/vault/.archivatorium/.docker-export-status.json';
 const writeStatus = async (status, error = undefined) => {
 	await require('node:fs/promises').writeFile(
 		statusPath,
@@ -20,7 +20,7 @@ const writeStatus = async (status, error = undefined) => {
 
 		if (process.env.EXPORT_ENTIRE_VAULT) {
 			console.log('Exporting entire vault...');
-			await plugin.exportVault('/output');
+			await plugin.exportVault();
 		} else {
 			console.log('Exporting...');
 			await plugin.exportDocker();

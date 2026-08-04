@@ -1,16 +1,28 @@
 import { Notice, TFile, TFolder } from "obsidian";
 import { Path } from "src/plugin/utils/path";
-import { ExportPreset, Settings, SettingsPage } from "src/plugin/settings/settings";
+import { ExportPreset, Settings } from "src/plugin/settings/settings";
 import { Utils } from "src/plugin/utils/utils";
 import { Website } from "src/plugin/website/website";
 import { ExportLog } from "src/plugin/render-api/render-api";
 import { ExportInfo, ExportModal } from "src/plugin/settings/export-modal";
+import { mkdir } from "fs/promises";
 
 export class HTMLExporter
 {
+	public static readonly serverDirectoryName = ".archivatorium";
 	public static lastExportSucceeded: boolean = false;
-	static async updateSettings(usePreviousSettings: boolean = false, overrideFiles: TFile[] | undefined = undefined, overrideExportPath: Path | undefined = undefined): Promise<ExportInfo | undefined>
+
+	private static async prepareServerRoot(): Promise<Path>
 	{
+		const serverRoot = Path.vaultPath.joinString(this.serverDirectoryName).absolute();
+		await mkdir(serverRoot.pathname, { recursive: true });
+		Settings.exportOptions.exportPath = serverRoot.path;
+		return serverRoot;
+	}
+
+	static async updateSettings(usePreviousSettings: boolean = false, overrideFiles: TFile[] | undefined = undefined, _overrideExportPath: Path | undefined = undefined): Promise<ExportInfo | undefined>
+	{
+		await this.prepareServerRoot();
 		if (!usePreviousSettings) 
 		{
 			const modal = new ExportModal();
@@ -18,12 +30,11 @@ export class HTMLExporter
 			return await modal.open();
 		}
 		
-		const path = overrideExportPath ?? new Path(Settings.exportOptions.exportPath);
 		const hasFiles = (overrideFiles ?? Settings.getFilesToExport()).length > 0;
 
-		if (!hasFiles || !path.exists || !path.isAbsolute || !path.isDirectory)
+		if (!hasFiles)
 		{
-			new Notice("Please set the export path and files to export in the settings first.", 5000);
+			new Notice("Please select files to publish first.", 5000);
 			const modal = new ExportModal();
 			if(overrideFiles) modal.overridePickedFiles(overrideFiles);
 			return await modal.open();
@@ -38,13 +49,13 @@ export class HTMLExporter
 		if ((!info && !usePreviousSettings) || (info && info.canceled)) return;
 
 		const files = info?.pickedFiles ?? overrideFiles ?? Settings.getFilesToExport();
-		const exportPath = overrideExportPath ?? info?.exportPath ?? new Path(Settings.exportOptions.exportPath);
+		const exportPath = await this.prepareServerRoot();
 
 		const website = await HTMLExporter.exportFiles(files, exportPath, true, Settings.deleteOldFiles);
 
 		if (!website) return;
 		if (Settings.openAfterExport) Utils.openPath(exportPath);
-		new Notice("✅ Finished HTML Export:\n\n" + exportPath, 5000);
+		new Notice("✅ Archivatorium server files updated:\n\n" + exportPath, 5000);
 	}
 
 	public static async exportFiles(files: TFile[], destination: Path, saveFiles: boolean, deleteOld: boolean) : Promise<Website | undefined>
@@ -134,10 +145,10 @@ export class HTMLExporter
 		return await this.exportFiles(files, rootExportPath, saveFiles, clearDirectory);
 	}
 
-	public static async exportVault(rootExportPath: Path, saveFiles: boolean, clearDirectory: boolean) : Promise<Website | undefined>
+	public static async exportVault(saveFiles: boolean, clearDirectory: boolean) : Promise<Website | undefined>
 	{
 		const files = app.vault.getFiles();
-		return await this.exportFiles(files, rootExportPath, saveFiles, clearDirectory);
+		return await this.exportFiles(files, await this.prepareServerRoot(), saveFiles, clearDirectory);
 	}
 
 }
