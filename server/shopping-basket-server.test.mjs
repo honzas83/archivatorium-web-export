@@ -13,6 +13,7 @@ test("server opens the direct SQLite export and keeps legacy corpus paths privat
 	await mkdir(vaultRoot, { recursive: true });
 	await mkdir(path.join(vaultRoot, ".obsidian", "plugins", "archivatorium-web-export"), { recursive: true });
 	await mkdir(path.join(vaultRoot, "Folder"), { recursive: true });
+	await mkdir(path.join(vaultRoot, "Archive"), { recursive: true });
 	await mkdir(path.join(vaultRoot, "Attachments"), { recursive: true });
 	await writeFile(path.join(vaultRoot, "Folder", "Document.md"), `---
 tags: Topic/Child
@@ -20,12 +21,13 @@ citekey: example2026
 ---
 # Document title
 
-Version one with complete searchable text, [[Target]], ![[Attachments/Report.pdf]] and #Topic/Child.
+Version one with complete searchable text, [[Target]], [Loose](Loose.md), ![[Attachments/Report.pdf]] and #Topic/Child.
 
 > [!info] Metadata
 > <span class="trusted">trusted HTML</span>
 `);
 	await writeFile(path.join(vaultRoot, "Target.md"), "# Target\n\nTarget content.");
+	await writeFile(path.join(vaultRoot, "Archive", "Loose.md"), "# Loose\n\nLoose content.");
 	await writeFile(path.join(vaultRoot, "Attachments", "Report.pdf"), "PDF fixture");
 	const configPath = path.join(vaultRoot, ".obsidian", "plugins", "archivatorium-web-export", "data.json");
 	await writeFile(configPath, JSON.stringify({ exportOptions: { siteName: "Test archive" } }));
@@ -61,8 +63,8 @@ Version one with complete searchable text, [[Target]], ![[Attachments/Report.pdf
 		assert.equal(statusResponse.status, 200);
 		assert.deepEqual(await statusResponse.json(), {
 			state: "ready",
-			processed: 3,
-			total: 3,
+			processed: 4,
+			total: 4,
 		});
 
 		const bootstrapResponse = await fetch(`${baseURL}/api/app/bootstrap`);
@@ -70,7 +72,7 @@ Version one with complete searchable text, [[Target]], ![[Attachments/Report.pdf
 		assert.equal((await bootstrapResponse.json()).navigationMode, "lazy");
 
 		const rootNavigation = await fetch(`${baseURL}/api/navigation`);
-		assert.deepEqual((await rootNavigation.json()).items.map((item) => item.path), ["Folder", "Target.md"]);
+		assert.deepEqual((await rootNavigation.json()).items.map((item) => item.path), ["Archive", "Folder", "Target.md"]);
 		const folderNavigation = await fetch(`${baseURL}/api/navigation?parent=Folder`);
 		assert.deepEqual((await folderNavigation.json()).items.map((item) => item.exportPath), ["folder/document.html"]);
 
@@ -81,11 +83,12 @@ Version one with complete searchable text, [[Target]], ![[Attachments/Report.pdf
 		assert.match(page.html, /Version one/);
 		assert.match(page.html, /class="trusted"/);
 		assert.match(page.html, /href="target.html"/);
+		assert.match(page.html, /href="archive\/loose.html"/);
 		assert.match(page.html, /src="\/attachments\/report.pdf"/);
 		assert.match(page.html, /data-callout="info"/);
 
 		const rootPageResponse = await fetch(`${baseURL}/api/page?path=index.html`);
-		assert.equal((await rootPageResponse.json()).data.sourcePath, "Folder/Document.md");
+		assert.equal((await rootPageResponse.json()).data.sourcePath, "Archive/Loose.md");
 
 		const attachmentResponse = await fetch(`${baseURL}/attachments/report.pdf`);
 		assert.equal(attachmentResponse.status, 200);

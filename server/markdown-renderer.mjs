@@ -26,7 +26,7 @@ function splitCallouts(markdown, renderContent) {
 	const lines = markdown.split(/\r?\n/);
 	const output = [];
 	for (let index = 0; index < lines.length;) {
-		const match = lines[index].match(/^>\s*\[!([A-Za-z0-9_-]+)[+-]?\]\s*(.*)$/i);
+		const match = lines[index].match(/^>\s*\[!([^\]]+)[+-]?\]\s*(.*)$/i);
 		if (!match) {
 			output.push(lines[index]);
 			index++;
@@ -116,7 +116,23 @@ export class MarkdownDocumentRenderer {
 	}
 
 	replaceObsidianSyntax(markdown) {
-		const withLinks = markdown.replace(WIKILINK_PATTERN, (_match, embed, rawTarget, rawHeading, rawLabel) => {
+		const withMarkdownLinks = markdown.replace(/(!?)\[([^\]]*)\]\(((?:[^()\s]|\([^)]*\))+)(?:\s+['"][^)]*['"])?\)/g, (match, embed, rawLabel, rawTarget) => {
+			const [target, rawHeading] = rawTarget.split("#", 2);
+			const resolved = this.resolveLink(target.trim());
+			if (!resolved) return match;
+			const label = rawLabel.trim() || target.split("/").pop()?.replace(/\.md$/i, "") || target;
+			const href = `${resolved.exportPath}${rawHeading ? `#${slugify(rawHeading)}` : ""}`;
+			if (embed) {
+				const extension = resolved.sourcePath.split(".").at(-1)?.toLowerCase();
+				if (["avif", "gif", "jpeg", "jpg", "png", "svg", "webp"].includes(extension)) {
+					return `<img class="internal-embed" src="/${escapeAttribute(href)}" alt="${escapeAttribute(label)}">`;
+				}
+				return `<a class="internal-link internal-embed" href="${escapeAttribute(href)}">${escapeAttribute(label)}</a>`;
+			}
+			return `<a class="internal-link" href="${escapeAttribute(href)}">${escapeAttribute(label)}</a>`;
+		});
+
+		const withLinks = withMarkdownLinks.replace(WIKILINK_PATTERN, (_match, embed, rawTarget, rawHeading, rawLabel) => {
 			const target = rawTarget.trim();
 			const resolved = this.resolveLink(target);
 			const label = rawLabel?.trim() || rawHeading?.trim() || target.split("/").pop()?.replace(/\.md$/i, "") || target;

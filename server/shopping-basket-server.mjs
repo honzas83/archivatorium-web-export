@@ -259,8 +259,15 @@ function resolveCorpusLink(database, sourcePath, target) {
 		}
 	}
 	const statement = database.prepare("SELECT export_path, source_path FROM metadata_documents WHERE source_path = ? LIMIT 1");
+	const basenameStatement = database.prepare(
+		"SELECT export_path, source_path FROM metadata_documents WHERE source_path LIKE ? ORDER BY tree_order, source_path LIMIT 1"
+	);
 	for (const candidate of candidates) {
 		const row = statement.get(candidate);
+		if (row) return { exportPath: row.export_path, sourcePath: row.source_path };
+	}
+	if (!normalizedTarget.includes("/")) {
+		const row = basenameStatement.get(`%/${normalizedTarget}`);
 		if (row) return { exportPath: row.export_path, sourcePath: row.source_path };
 	}
 	return undefined;
