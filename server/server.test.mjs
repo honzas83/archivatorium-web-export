@@ -69,7 +69,18 @@ Version one with complete searchable text, [[Target]], [Loose](Loose.md), ![[Att
 		assert.equal(searchResponse.status, 200);
 		const searchResult = await searchResponse.json();
 		assert.equal(searchResult.items.length, 1);
+		assert.equal(searchResult.total, 1);
 		assert.equal(searchResult.items[0].sourcePath, "Folder/Document.md");
+		assert.equal("tags" in searchResult.items[0], false);
+		assert.equal("headers" in searchResult.items[0], false);
+		const emptySearchPageResponse = await fetch(`${baseURL}/api/search`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ query: "searchable", type: 32, offset: 1, limit: 50 }),
+		});
+		const emptySearchPage = await emptySearchPageResponse.json();
+		assert.equal(emptySearchPage.total, 1);
+		assert.deepEqual(emptySearchPage.items, []);
 		assert.equal((await stat(path.join(serverRoot, "corpus.sqlite"))).isFile(), true);
 
 		const multiwordResponse = await fetch(`${baseURL}/api/search`, {
@@ -104,7 +115,13 @@ Version one with complete searchable text, [[Target]], [Loose](Loose.md), ![[Att
 
 		const bootstrapResponse = await fetch(`${baseURL}/api/app/bootstrap`);
 		assert.equal(bootstrapResponse.status, 200);
-		assert.equal((await bootstrapResponse.json()).navigationMode, "lazy");
+		const bootstrap = await bootstrapResponse.json();
+		assert.equal(bootstrap.navigationMode, "lazy");
+		assert.equal(bootstrap.tagTree.find((item) => item.path === "Topic")?.hasChildren, true);
+		assert.deepEqual(bootstrap.tagTree.find((item) => item.path === "Topic")?.children, []);
+		const tagChildrenResponse = await fetch(`${baseURL}/api/tags?parent=Topic`);
+		assert.equal(tagChildrenResponse.status, 200);
+		assert.deepEqual((await tagChildrenResponse.json()).items.map((item) => item.path), ["Topic/Child"]);
 
 		const rootNavigation = await fetch(`${baseURL}/api/navigation`);
 		const rootNavigationItems = (await rootNavigation.json()).items;
@@ -155,7 +172,30 @@ Version one with complete searchable text, [[Target]], [Loose](Loose.md), ![[Att
 		assert.equal(tagResponse.status, 200);
 		const tagResult = await tagResponse.json();
 		assert.equal(tagResult.items.length, 1);
+		assert.equal(tagResult.total, 1);
 		assert.equal(tagResult.items[0].navigationTitle, "Document");
+
+		const checkoutSummaryResponse = await fetch(`${baseURL}/api/checkout/summary`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({
+				items: [],
+				batches: [{ kind: "query", query: "Searchable", searchQuery: "searchable", type: 32, excludedSourcePaths: [] }],
+			}),
+		});
+		assert.equal(checkoutSummaryResponse.status, 200);
+		assert.deepEqual(await checkoutSummaryResponse.json(), { count: 1 });
+
+		const streamedCheckoutResponse = await fetch(`${baseURL}/api/checkout`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ items: [{ sourcePath: "Folder/Document.md" }] }),
+		});
+		assert.equal(streamedCheckoutResponse.status, 200);
+		assert.equal(streamedCheckoutResponse.headers.get("content-length"), null);
+		const streamedZip = Buffer.from(await streamedCheckoutResponse.arrayBuffer());
+		assert.equal(streamedZip.readUInt32LE(0), 0x04034b50);
+		assert.equal(streamedZip.readUInt32LE(streamedZip.length - 22), 0x06054b50);
 
 		const redirectResponse = await fetch(`${baseURL}/example2026`, {
 			redirect: "manual",

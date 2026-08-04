@@ -28,7 +28,15 @@ export interface BasketSearchItem
 export interface BasketSearchSnapshot
 {
 	query: string;
+	searchQuery: string;
+	type: SearchType;
+	total: number;
+}
+
+export interface SearchPage
+{
 	items: BasketSearchItem[];
+	total: number;
 }
 
 export class Search
@@ -65,12 +73,12 @@ export class Search
 		}
 
 		const requestId = ++this.searchRequestId;
-		let results = await this.runSearchQuery(query, type, Search.visibleResultLimit + 1);
+		const page = await this.runSearchQuery(query, type, Search.visibleResultLimit);
+		let results = page.items as Array<SearchResult>;
 		if (requestId !== this.searchRequestId) return;
 
-		if (results.length > Search.visibleResultLimit)
+		if (page.total > Search.visibleResultLimit)
 		{
-			results = results.slice(0, Search.visibleResultLimit);
 			if (!this.limitNotice?.notification?.isConnected)
 			{
 				this.limitNotice = new Notice(
@@ -181,34 +189,30 @@ export class Search
 	{
 		const parsed = this.parseQueryFilter(queryString);
 		const type = parsed.type ?? allSearch;
-		const configuredLimit = Number(ObsidianSite.metadata.featureOptions.shoppingBasket.maxCheckoutItems ?? 0);
-		const checkoutLimit = Number.isFinite(configuredLimit) ? Math.max(0, Math.trunc(configuredLimit)) : 0;
-		const results = await this.runSearchQuery(parsed.value, type, checkoutLimit);
-		const seen = new Set<string>();
-		const items: BasketSearchItem[] = [];
-
-		for (const result of results)
-		{
-			const exportPath = this.getResultPath(result);
-			const webpage = this.getResultWebpage(result);
-			const sourcePath = String((result as any).sourcePath ?? webpage?.sourcePath ?? "");
-
-			if (!exportPath || !sourcePath || seen.has(sourcePath)) continue;
-			seen.add(sourcePath);
-			items.push({
-				exportPath,
-				sourcePath,
-				title: this.getResultTitle(result),
-			});
-		}
+		const page = await this.runSearchQuery(parsed.value, type, 0);
 
 		return {
 			query: queryString,
-			items,
+			searchQuery: parsed.value,
+			type,
+			total: page.total,
 		};
 	}
 
-	private async runSearchQuery(query: string, type: SearchType, limit: number): Promise<Array<SearchResult>>
+	public async getSearchPage(snapshot: BasketSearchSnapshot, offset: number, limit: number): Promise<SearchPage>
+	{
+		const page = await this.runSearchQuery(snapshot.searchQuery, snapshot.type, limit, offset);
+		return {
+			total: page.total,
+			items: page.items.map((result: any) => ({
+				exportPath: this.getResultPath(result),
+				sourcePath: String(result.sourcePath ?? ""),
+				title: this.getResultTitle(result),
+			})).filter((item) => item.exportPath && item.sourcePath),
+		};
+	}
+
+	private async runSearchQuery(query: string, type: SearchType, limit: number, offset: number = 0): Promise<{ items: Array<SearchResult>, total: number }>
 	{
 		const searchFields: string[] = [];
 		if (type & SearchType.Title) searchFields.push('title');
@@ -226,11 +230,14 @@ export class Search
 				method: "POST",
 				credentials: "same-origin",
 				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ query: searchQuery, type, limit }),
+				body: JSON.stringify({ query: searchQuery, type, limit, offset }),
 			});
 			if (!response.ok) throw new Error(`Search server returned ${response.status}.`);
 			const data = await response.json();
-			return Array.isArray(data.items) ? data.items : [];
+			return {
+				items: Array.isArray(data.items) ? data.items : [],
+				total: Number(data.total ?? 0),
+			};
 		}
 
 		let results: Array<SearchResult> = this.index?.search(searchQuery,
@@ -246,7 +253,11 @@ export class Search
 			results = this.filterTagResults(results, query);
 		}
 
-		return results;
+		const total = results.length;
+		return {
+			items: limit > 0 ? results.slice(offset, offset + limit) : [],
+			total,
+		};
 	}
 
 	private getResultPath(result: any): string

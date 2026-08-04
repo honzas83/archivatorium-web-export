@@ -72,6 +72,7 @@ export interface TagTreeItemData
 	name: string;
 	path: string;
 	count: number;
+	hasChildren?: boolean;
 	children: TagTreeItemData[];
 }
 

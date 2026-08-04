@@ -1,7 +1,6 @@
 import { DynamicInsertedFeature } from "src/shared/dynamic-inserted-feature";
 import { TagsOptions } from "src/shared/features/tags";
 import { TagTreeItemData } from "src/shared/website-data";
-import { Tree } from "./trees";
 
 interface TagsDependencies {
 	tagTree: TagTreeItemData[];
@@ -166,7 +165,8 @@ class RightSidebarViewManager {
 }
 
 export class Tags extends DynamicInsertedFeature<TagsOptions, TagsDependencies> {
-	private tree: Tree | undefined = undefined;
+	private loadedPaths: Set<string> | undefined;
+	private expandedPaths: Set<string> | undefined;
 
 	constructor(tagTree: TagTreeItemData[]) {
 		super(ObsidianSite.metadata.featureOptions.tags, { tagTree });
@@ -212,19 +212,21 @@ export class Tags extends DynamicInsertedFeature<TagsOptions, TagsDependencies> 
 		collapseAllEl.innerHTML =
 			"<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'></svg>";
 		controlsEl.appendChild(collapseAllEl);
+		collapseAllEl.addEventListener("click", () => this.collapseAll(treeContainer));
 
 		for (const node of deps.tagTree) {
 			treeContainer.appendChild(this.createTreeItem(node));
 		}
 
-		this.tree = new Tree(treeContainer, 1);
+		this.updateCollapseAllIcon();
 		RightSidebarViewManager.getOrCreate().refresh();
 	}
 
 	private createTreeItem(node: TagTreeItemData): HTMLElement {
 		const itemEl = document.createElement("div");
 		itemEl.classList.add("tree-item");
-		if (node.children.length > 0) {
+		const hasChildren = node.hasChildren === true || node.children.length > 0;
+		if (hasChildren) {
 			itemEl.classList.add("mod-collapsible");
 		}
 
@@ -234,11 +236,19 @@ export class Tags extends DynamicInsertedFeature<TagsOptions, TagsDependencies> 
 		itemLinkEl.setAttribute("data-path", node.path);
 		itemEl.appendChild(itemLinkEl);
 
-		if (node.children.length > 0) {
+		if (hasChildren) {
 			const collapseIconEl = document.createElement("div");
 			collapseIconEl.classList.add("tree-item-icon", "collapse-icon");
+			collapseIconEl.classList.add("is-collapsed");
+			collapseIconEl.setAttribute("role", "button");
+			collapseIconEl.setAttribute("aria-expanded", "false");
 			collapseIconEl.innerHTML =
 				'<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="svg-icon right-triangle"><path d="M3 8L12 17L21 8"></path></svg>';
+			collapseIconEl.addEventListener("click", (event) => {
+				event.preventDefault();
+				event.stopPropagation();
+				void this.toggleNode(node.path, itemEl, collapseIconEl, childrenEl);
+			});
 			itemLinkEl.appendChild(collapseIconEl);
 		}
 
@@ -254,6 +264,7 @@ export class Tags extends DynamicInsertedFeature<TagsOptions, TagsDependencies> 
 
 		const childrenEl = document.createElement("div");
 		childrenEl.classList.add("tree-item-children");
+		childrenEl.hidden = true;
 		itemEl.appendChild(childrenEl);
 
 		for (const child of node.children) {
@@ -261,6 +272,73 @@ export class Tags extends DynamicInsertedFeature<TagsOptions, TagsDependencies> 
 		}
 
 		return itemEl;
+	}
+
+	private async toggleNode(
+		path: string,
+		itemEl: HTMLElement,
+		iconEl: HTMLElement,
+		childrenEl: HTMLElement,
+	): Promise<void> {
+		const expandedPaths = this.getExpandedPaths();
+		const loadedPaths = this.getLoadedPaths();
+		const expand = !expandedPaths.has(path);
+		if (expand && !loadedPaths.has(path)) {
+			iconEl.classList.add("is-loading");
+			try {
+				const response = await fetch(`/api/tags?parent=${encodeURIComponent(path)}`, {
+					credentials: "same-origin",
+				});
+				if (!response.ok) throw new Error(`Tag server returned ${response.status}.`);
+				const data = await response.json();
+				for (const child of data.items ?? []) {
+					childrenEl.appendChild(this.createTreeItem(child));
+				}
+				loadedPaths.add(path);
+			} catch (error) {
+				console.error("Failed to load tag children", error);
+				return;
+			} finally {
+				iconEl.classList.remove("is-loading");
+			}
+		}
+
+		if (expand) expandedPaths.add(path);
+		else expandedPaths.delete(path);
+		itemEl.classList.toggle("is-collapsed", !expand);
+		iconEl.classList.toggle("is-collapsed", !expand);
+		iconEl.setAttribute("aria-expanded", String(expand));
+		childrenEl.hidden = !expand;
+		this.updateCollapseAllIcon();
+	}
+
+	private collapseAll(treeContainer: HTMLElement): void {
+		this.getExpandedPaths().clear();
+		for (const itemEl of Array.from(treeContainer.querySelectorAll(".tree-item.mod-collapsible")) as HTMLElement[]) {
+			itemEl.classList.add("is-collapsed");
+			const iconEl = itemEl.querySelector(":scope > .tree-item-self > .collapse-icon") as HTMLElement | null;
+			iconEl?.classList.add("is-collapsed");
+			iconEl?.setAttribute("aria-expanded", "false");
+			const childrenEl = itemEl.querySelector(":scope > .tree-item-children") as HTMLElement | null;
+			if (childrenEl) childrenEl.hidden = true;
+		}
+		this.updateCollapseAllIcon();
+	}
+
+	private updateCollapseAllIcon(): void {
+		const svgEl = document.querySelector("#tags .tree-collapse-all svg");
+		if (!svgEl) return;
+		svgEl.innerHTML = this.getExpandedPaths().size > 0
+			? '<path d="m7 15 5 5 5-5"></path><path d="m7 9 5-5 5 5"></path>'
+			: '<path d="m7 20 5-5 5 5"></path><path d="m7 4 5 5 5-5"></path>';
+	}
+
+	private getLoadedPaths(): Set<string> {
+		return this.loadedPaths ??= new Set<string>();
+	}
+
+	private getExpandedPaths(): Set<string> {
+		return this.expandedPaths ??= new Set<string>();
 	}
 
 	private getTagSearchHref(tagPath: string): string {

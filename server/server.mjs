@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { createServer } from "node:http";
+import { once } from "node:events";
 import { createReadStream } from "node:fs";
 import { readFile, readdir, stat } from "node:fs/promises";
 import { DatabaseSync } from "node:sqlite";
@@ -24,6 +25,7 @@ const SEARCH_VALUE_SEPARATOR = "\u001f";
 const PAGE_CACHE_ENTRIES = Math.max(1, Number(process.env.PAGE_CACHE_ENTRIES ?? 256));
 let corpusDatabasePromise;
 const navigationSnapshotPromises = new Map();
+let tagSnapshotPromise;
 const markdownRenderer = new MarkdownDocumentRenderer({ maxEntries: PAGE_CACHE_ENTRIES });
 const corpusStatus = {
 	state: "idle",
@@ -224,6 +226,43 @@ function buildTagTree(rows, showInlineTags, showFrontmatterTags) {
 	return serialize(root);
 }
 
+async function getTagSnapshot() {
+	if (!tagSnapshotPromise) {
+		tagSnapshotPromise = (async () => {
+			const metadata = await loadBootstrapMetadata();
+			const database = await getCorpusDatabase();
+			const rows = database.prepare(
+				"SELECT inline_tags, frontmatter_tags FROM metadata_documents WHERE kind = 'webpage'"
+			).all();
+			const tree = buildTagTree(
+				rows,
+				metadata.featureOptions?.tags?.showInlineTags !== false,
+				metadata.featureOptions?.tags?.showFrontmatterTags !== false,
+			);
+			const childrenByParent = new Map([["", tree]]);
+			const visit = (nodes) => {
+				for (const node of nodes) {
+					childrenByParent.set(node.path, node.children);
+					visit(node.children);
+				}
+			};
+			visit(tree);
+			return childrenByParent;
+		})();
+	}
+	return tagSnapshotPromise;
+}
+
+function serializeTagChildren(nodes) {
+	return nodes.map((node) => ({
+		name: node.name,
+		path: node.path,
+		count: node.count,
+		hasChildren: node.children.length > 0,
+		children: [],
+	}));
+}
+
 async function handleMetadataBootstrap(_request, response) {
 	try {
 		sendJSON(response, 200, await getAppBootstrap());
@@ -235,21 +274,28 @@ async function handleMetadataBootstrap(_request, response) {
 
 async function getAppBootstrap() {
 	const metadata = JSON.parse(await readFile(path.join(SERVER_ROOT, "site-lib", "metadata.json"), "utf8"));
-	const database = await getCorpusDatabase();
-	const rows = database.prepare(
-		"SELECT inline_tags, frontmatter_tags FROM metadata_documents WHERE kind = 'webpage'"
-	).all();
-	metadata.tagTree = buildTagTree(
-		rows,
-		metadata.featureOptions?.tags?.showInlineTags !== false,
-		metadata.featureOptions?.tags?.showFrontmatterTags !== false,
-	);
+	const tagSnapshot = await getTagSnapshot();
+	metadata.tagTree = serializeTagChildren(tagSnapshot.get("") ?? []);
 	metadata.webpages = {};
 	metadata.fileInfo = {};
 	metadata.sourceToTarget = {};
 	metadata.metadataValueToTarget = {};
 	metadata.navigationMode = "lazy";
 	return metadata;
+}
+
+async function handleTags(request, response) {
+	try {
+		const requestURL = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
+		const parent = normalizeNavigationParent(requestURL.searchParams.get("parent") ?? "");
+		const snapshot = await getTagSnapshot();
+		sendJSON(response, 200, {
+			parent,
+			items: serializeTagChildren(snapshot.get(parent) ?? []),
+		});
+	} catch (error) {
+		sendJSON(response, 400, { error: error.message ?? "Tag request failed." });
+	}
 }
 
 function normalizeNavigationParent(value) {
@@ -412,59 +458,119 @@ async function handleMetadataDocument(request, response) {
 	sendJSON(response, 200, JSON.parse(row.data));
 }
 
-async function handleSearch(request, response) {
-	try {
-		const body = await readJSONBody(request);
-		const query = typeof body.query === "string" ? body.query.trim() : "";
-		const type = Number(body.type ?? 127);
-		const requestedLimit = Number(body.limit ?? 50);
-		const maximumLimit = Math.max(MINIMUM_SEARCH_API_LIMIT, getMaxCheckoutItems(await loadBootstrapMetadata()));
-		const normalizedRequestedLimit = Number.isFinite(requestedLimit) ? Math.trunc(requestedLimit) : 50;
-		const limit = normalizedRequestedLimit <= 0
-			? (Number.isFinite(maximumLimit) ? maximumLimit : -1)
-			: Math.max(1, Math.min(normalizedRequestedLimit, maximumLimit));
-		const tokenQuery = tokenizeSearchQuery(query);
-		const columns = searchColumnsForType(type);
+async function runCorpusSearch({ query, type = 127, offset = 0, limit = 50 }) {
+	const normalizedQuery = String(query ?? "").trim();
+	const normalizedType = Number(type);
+	const normalizedOffset = Math.max(0, Math.trunc(Number(offset) || 0));
+	const normalizedLimit = Math.max(0, Math.trunc(Number(limit) || 0));
+	const database = await getCorpusDatabase();
+	let rows = [];
+	let total = 0;
+
+	if (normalizedType === 8) {
+		const tag = normalizedQuery.replace(/^#+/, "").toLowerCase();
+		if (!tag) return { query: normalizedQuery, type: normalizedType, offset: normalizedOffset, total, items: [] };
+		const separator = SEARCH_VALUE_SEPARATOR;
+		const where = `
+			instr(? || replace(lower(tags), '#', '') || ?, ? || ? || ?) > 0
+			OR instr(? || replace(lower(tags), '#', ''), ? || ? || '/') > 0
+		`;
+		const parameters = [separator, separator, separator, tag, separator, separator, separator, tag];
+		total = Number(database.prepare(`SELECT COUNT(*) AS count FROM search_documents WHERE ${where}`).get(...parameters).count);
+		if (normalizedLimit > 0) {
+			rows = database.prepare(`
+				SELECT path, source_path, title, 0 AS rank
+				FROM search_documents WHERE ${where}
+				ORDER BY source_path
+				LIMIT ? OFFSET ?
+			`).all(...parameters, normalizedLimit, normalizedOffset);
+		}
+	} else {
+		const tokenQuery = tokenizeSearchQuery(normalizedQuery);
+		const columns = searchColumnsForType(normalizedType);
 		if (!tokenQuery || columns.length === 0) {
-			sendJSON(response, 200, { query, items: [] });
-			return;
+			return { query: normalizedQuery, type: normalizedType, offset: normalizedOffset, total, items: [] };
 		}
-
 		const matchQuery = `{${columns.join(" ")}} : (${tokenQuery})`;
-		const database = await getCorpusDatabase();
-		const candidateLimit = limit < 0 ? -1 : (type === 8 ? Math.max(limit * 10, 1000) : limit);
-		let rows = database.prepare(`
-			SELECT path, source_path, title, aliases, headers, tags,
-				bm25(search_documents, 0, 0, 2, 8, 1.8, 1.5, 1.3, 1) AS rank
-			FROM search_documents
-			WHERE search_documents MATCH ?
-			ORDER BY rank
-			LIMIT ?
-		`).all(matchQuery, candidateLimit);
-
-		if (type === 8) {
-			const normalizedTag = query.trim().replace(/^#+/, "").toLowerCase();
-			rows = rows.filter((row) => splitSearchValues(row.tags).some((tag) => {
-				const normalized = tag.trim().replace(/^#+/, "").toLowerCase();
-				return normalized === normalizedTag || normalized.startsWith(`${normalizedTag}/`);
-			}));
+		total = Number(database.prepare(
+			"SELECT COUNT(*) AS count FROM search_documents WHERE search_documents MATCH ?"
+		).get(matchQuery).count);
+		if (normalizedLimit > 0) {
+			rows = database.prepare(`
+				SELECT path, source_path, title,
+					bm25(search_documents, 0, 0, 2, 8, 1.8, 1.5, 1.3, 1) AS rank
+				FROM search_documents
+				WHERE search_documents MATCH ?
+				ORDER BY rank
+				LIMIT ? OFFSET ?
+			`).all(matchQuery, normalizedLimit, normalizedOffset);
 		}
+	}
 
-		const showDocumentTitles = await useDocumentTitlesInNavigation();
-		const limitedRows = limit < 0 ? rows : rows.slice(0, limit);
-		const items = limitedRows.map((row) => ({
+	const showDocumentTitles = await useDocumentTitlesInNavigation();
+	return {
+		query: normalizedQuery,
+		type: normalizedType,
+		offset: normalizedOffset,
+		total,
+		items: rows.map((row) => ({
 			path: row.path,
 			sourcePath: row.source_path,
 			title: row.title,
 			navigationTitle: showDocumentTitles
 				? row.title
 				: path.posix.basename(row.source_path, path.posix.extname(row.source_path)),
-			aliases: splitSearchValues(row.aliases),
-			headers: splitSearchValues(row.headers),
-			tags: splitSearchValues(row.tags),
-			score: Math.max(Number.EPSILON, -Number(row.rank)),
+		})),
+	};
+}
+
+async function getAllCorpusSearchItems(query, type = 127) {
+	const normalizedQuery = String(query ?? "").trim();
+	const normalizedType = Number(type);
+	const database = await getCorpusDatabase();
+	let rows;
+	if (normalizedType === 8) {
+		const tag = normalizedQuery.replace(/^#+/, "").toLowerCase();
+		if (!tag) return [];
+		const separator = SEARCH_VALUE_SEPARATOR;
+		const where = `
+			instr(? || replace(lower(tags), '#', '') || ?, ? || ? || ?) > 0
+			OR instr(? || replace(lower(tags), '#', ''), ? || ? || '/') > 0
+		`;
+		rows = database.prepare(`
+			SELECT path, source_path, title FROM search_documents WHERE ${where}
+		`).all(separator, separator, separator, tag, separator, separator, separator, tag);
+	} else {
+		const tokenQuery = tokenizeSearchQuery(normalizedQuery);
+		const columns = searchColumnsForType(normalizedType);
+		if (!tokenQuery || columns.length === 0) return [];
+		const matchQuery = `{${columns.join(" ")}} : (${tokenQuery})`;
+		rows = database.prepare(`
+			SELECT path, source_path, title
+			FROM search_documents WHERE search_documents MATCH ?
+		`).all(matchQuery);
+	}
+	return rows.map((row) => ({
+		path: row.path,
+		sourcePath: row.source_path,
+		title: row.title,
+	}));
+}
+
+async function handleSearch(request, response) {
+	try {
+		const body = await readJSONBody(request);
+		const requestedLimit = Number(body.limit ?? 50);
+		const limit = Math.max(0, Math.min(
+			Number.isFinite(requestedLimit) ? Math.trunc(requestedLimit) : 50,
+			MINIMUM_SEARCH_API_LIMIT,
+		));
+		sendJSON(response, 200, await runCorpusSearch({
+			query: body.query,
+			type: body.type,
+			offset: body.offset,
+			limit,
 		}));
-		sendJSON(response, 200, { query, items });
 	} catch (error) {
 		console.error("Search failed:", error);
 		sendJSON(response, 400, { error: error.message ?? "Search failed." });
@@ -570,6 +676,25 @@ async function loadMetadata() {
 			? Object.assign({}, ...webpages.map((bucket) => JSON.parse(bucket)))
 			: JSON.parse(webpages);
 		metadata.fileInfo = JSON.parse(fileInfo);
+	}
+	return metadata;
+}
+
+async function loadCheckoutMetadata() {
+	const metadata = await loadBootstrapMetadata();
+	const database = await getCorpusDatabase();
+	metadata.sourceToTarget = {};
+	metadata.fileInfo = {};
+	for (const row of database.prepare(
+		"SELECT source_path, export_path, kind FROM metadata_documents"
+	).all()) {
+		metadata.sourceToTarget[row.source_path] = row.export_path;
+		if (row.kind === "file") {
+			metadata.fileInfo[row.export_path] = {
+				sourcePath: row.source_path,
+				exportPath: row.export_path,
+			};
+		}
 	}
 	return metadata;
 }
@@ -841,6 +966,53 @@ function getBasketBatches(bodyItems, batches) {
 	}];
 }
 
+async function resolveCheckoutSelection(bodyItems, queryBatches, metadata) {
+	const selected = new Map();
+	const resolvedBatches = [];
+	const maxCheckoutItems = getMaxCheckoutItems(metadata);
+	const addItem = (item) => {
+		const normalized = normalizeVaultPath(item?.sourcePath);
+		if (!selected.has(normalized.sourcePath)) {
+			selected.set(normalized.sourcePath, {
+				sourcePath: normalized.sourcePath,
+				exportPath: String(item.exportPath ?? item.path ?? ""),
+				title: String(item.title ?? path.posix.basename(normalized.sourcePath, ".md")),
+			});
+			if (Number.isFinite(maxCheckoutItems) && selected.size > maxCheckoutItems) {
+				const unit = maxCheckoutItems === 1 ? "item" : "items";
+				throw Object.assign(new Error(`Checkout request exceeds the configured limit of ${maxCheckoutItems} ${unit}.`), { statusCode: 413 });
+			}
+		}
+	};
+
+	const explicitItems = Array.isArray(bodyItems) ? bodyItems : [];
+	if (explicitItems.length > 0) {
+		const batch = { query: "Selected documents", items: [] };
+		for (const item of explicitItems) {
+			addItem(item);
+			batch.items.push(item);
+		}
+		resolvedBatches.push(batch);
+	}
+
+	for (const [index, batch] of (Array.isArray(queryBatches) ? queryBatches : []).entries()) {
+		if (batch?.kind !== "query") continue;
+		const excluded = new Set(Array.isArray(batch.excludedSourcePaths) ? batch.excludedSourcePaths.map(String) : []);
+		const resolvedBatch = { query: String(batch.query ?? `Search ${index + 1}`), items: [] };
+		for (const item of await getAllCorpusSearchItems(batch.searchQuery, batch.type)) {
+			if (excluded.has(item.sourcePath)) continue;
+			addItem(item);
+			resolvedBatch.items.push(item);
+		}
+		if (resolvedBatch.items.length > 0) resolvedBatches.push(resolvedBatch);
+	}
+
+	if (selected.size === 0) {
+		throw Object.assign(new Error("Checkout request must include at least one item."), { statusCode: 400 });
+	}
+	return { items: Array.from(selected.values()), batches: resolvedBatches };
+}
+
 function buildCheckoutIndex(bodyItems, batches, selectedSources, indexes) {
 	const lines = [
 		"# Checkout index",
@@ -889,7 +1061,7 @@ function buildCheckoutIndex(bodyItems, batches, selectedSources, indexes) {
 	return `${lines.join("\n")}\n`;
 }
 
-async function buildCheckoutFiles(items, metadata, batches = []) {
+async function* iterateCheckoutFiles(items, metadata, batches = []) {
 	const normalizedItems = [];
 	const seen = new Set();
 	const maxCheckoutItems = getMaxCheckoutItems(metadata);
@@ -918,7 +1090,6 @@ async function buildCheckoutFiles(items, metadata, batches = []) {
 	const selectedSources = new Set(normalizedItems.map((item) => item.sourcePath));
 	const indexes = buildSourceIndexes(metadata);
 	const checkoutIndex = buildCheckoutIndex(items, batches, selectedSources, indexes);
-	const files = [];
 	let hasRootIndex = false;
 
 	for (const item of normalizedItems) {
@@ -931,24 +1102,30 @@ async function buildCheckoutFiles(items, metadata, batches = []) {
 		const rewrittenMarkdown = rewriteMarkdownLinks(markdown, item.sourcePath, selectedSources, indexes);
 		const isRootIndex = item.sourcePath.toLowerCase() === "index.md";
 		if (isRootIndex) hasRootIndex = true;
-		files.push({
+		yield {
 			path: item.sourcePath,
 			data: Buffer.from(
 				`${isRootIndex ? `${checkoutIndex}\n---\n\n` : ""}${addOnlineSourceReference(rewrittenMarkdown, item.sourcePath, indexes)}`,
 				"utf8"
 			),
-		});
+		};
 	}
 
 	if (!hasRootIndex) {
-		files.unshift({
+		yield {
 			path: "index.md",
 			data: Buffer.from(checkoutIndex, "utf8"),
-		});
+		};
 	}
 
-	files.push(...await collectObsidianConfigFiles());
+	for (const file of await collectObsidianConfigFilePaths()) {
+		yield { path: file.path, data: await readFile(file.absolutePath) };
+	}
+}
 
+async function buildCheckoutFiles(items, metadata, batches = []) {
+	const files = [];
+	for await (const file of iterateCheckoutFiles(items, metadata, batches)) files.push(file);
 	return files;
 }
 
@@ -966,7 +1143,7 @@ async function getOptionalRootIndex() {
 	}
 }
 
-async function collectObsidianConfigFiles() {
+async function collectObsidianConfigFilePaths() {
 	const obsidianRoot = path.resolve(VAULT_ROOT, ".obsidian");
 	if (!isPathInside(VAULT_ROOT, obsidianRoot)) return [];
 
@@ -978,11 +1155,11 @@ async function collectObsidianConfigFiles() {
 	}
 
 	const files = [];
-	await collectDirectoryFiles(obsidianRoot, ".obsidian", files);
+	await collectDirectoryFilePaths(obsidianRoot, ".obsidian", files);
 	return files;
 }
 
-async function collectDirectoryFiles(absoluteDirectory, zipDirectory, files) {
+async function collectDirectoryFilePaths(absoluteDirectory, zipDirectory, files) {
 	const entries = await readdir(absoluteDirectory, { withFileTypes: true });
 
 	for (const entry of entries) {
@@ -993,16 +1170,13 @@ async function collectDirectoryFiles(absoluteDirectory, zipDirectory, files) {
 
 		const zipPath = path.posix.join(zipDirectory, entry.name);
 		if (entry.isDirectory()) {
-			await collectDirectoryFiles(absolutePath, zipPath, files);
+			await collectDirectoryFilePaths(absolutePath, zipPath, files);
 			continue;
 		}
 
 		if (!entry.isFile()) continue;
 
-		files.push({
-			path: zipPath,
-			data: await readFile(absolutePath),
-		});
+		files.push({ path: zipPath, absolutePath });
 	}
 }
 
@@ -1105,24 +1279,103 @@ function createZip(files) {
 	return Buffer.concat([...chunks, ...central, end]);
 }
 
+async function writeChunk(response, chunk) {
+	if (!response.write(chunk)) await once(response, "drain");
+}
+
+async function streamZip(response, files) {
+	const central = [];
+	let offset = 0;
+	let fileCount = 0;
+	const { dosTime, dosDate } = dosDateTime();
+
+	for await (const file of files) {
+		const name = Buffer.from(file.path.replaceAll("\\", "/"), "utf8");
+		const data = file.data;
+		const crc = crc32(data);
+		const localOffset = offset;
+		const local = Buffer.alloc(30);
+		local.writeUInt32LE(0x04034b50, 0);
+		local.writeUInt16LE(20, 4);
+		local.writeUInt16LE(0x0808, 6);
+		local.writeUInt16LE(0, 8);
+		local.writeUInt16LE(dosTime, 10);
+		local.writeUInt16LE(dosDate, 12);
+		local.writeUInt16LE(name.length, 26);
+		const descriptor = Buffer.alloc(16);
+		descriptor.writeUInt32LE(0x08074b50, 0);
+		descriptor.writeUInt32LE(crc, 4);
+		descriptor.writeUInt32LE(data.length, 8);
+		descriptor.writeUInt32LE(data.length, 12);
+		await writeChunk(response, local);
+		await writeChunk(response, name);
+		await writeChunk(response, data);
+		await writeChunk(response, descriptor);
+		offset += local.length + name.length + data.length + descriptor.length;
+
+		const centralHeader = Buffer.alloc(46);
+		centralHeader.writeUInt32LE(0x02014b50, 0);
+		centralHeader.writeUInt16LE(20, 4);
+		centralHeader.writeUInt16LE(20, 6);
+		centralHeader.writeUInt16LE(0x0808, 8);
+		centralHeader.writeUInt16LE(0, 10);
+		centralHeader.writeUInt16LE(dosTime, 12);
+		centralHeader.writeUInt16LE(dosDate, 14);
+		centralHeader.writeUInt32LE(crc, 16);
+		centralHeader.writeUInt32LE(data.length, 20);
+		centralHeader.writeUInt32LE(data.length, 24);
+		centralHeader.writeUInt16LE(name.length, 28);
+		centralHeader.writeUInt32LE(localOffset, 42);
+		central.push(centralHeader, name);
+		fileCount++;
+	}
+
+	const centralOffset = offset;
+	let centralSize = 0;
+	for (const chunk of central) {
+		await writeChunk(response, chunk);
+		centralSize += chunk.length;
+	}
+	const end = Buffer.alloc(22);
+	end.writeUInt32LE(0x06054b50, 0);
+	end.writeUInt16LE(fileCount, 8);
+	end.writeUInt16LE(fileCount, 10);
+	end.writeUInt32LE(centralSize, 12);
+	end.writeUInt32LE(centralOffset, 16);
+	response.end(end);
+}
+
+async function handleCheckoutSummary(request, response) {
+	try {
+		requireConfig();
+		const body = await readJSONBody(request);
+		const metadata = await loadBootstrapMetadata();
+		const selection = await resolveCheckoutSelection(body.items, body.batches, metadata);
+		sendJSON(response, 200, { count: selection.items.length });
+	} catch (error) {
+		const statusCode = error.statusCode ?? 400;
+		sendJSON(response, statusCode, { error: error.message ?? "Checkout summary failed." });
+	}
+}
+
 async function handleCheckout(request, response) {
 	try {
 		requireConfig();
 		const body = await readJSONBody(request);
-		const metadata = await loadMetadata();
-		const files = await buildCheckoutFiles(body.items, metadata, body.batches);
-		const zip = createZip(files);
+		const metadata = await loadCheckoutMetadata();
+		const selection = await resolveCheckoutSelection(body.items, body.batches, metadata);
 		const filename = `vault-subset-${new Date().toISOString().slice(0, 10)}.zip`;
-
-		send(response, 200, zip, {
+		response.writeHead(200, {
 			"Content-Type": "application/zip",
 			"Content-Disposition": `attachment; filename="${filename}"`,
 			"Cache-Control": "no-store",
 		});
+		await streamZip(response, iterateCheckoutFiles(selection.items, metadata, selection.batches));
 	} catch (error) {
 		const statusCode = error.statusCode ?? 400;
 		console.error("Checkout failed:", error);
-		sendJSON(response, statusCode, { error: error.message ?? "Checkout failed." });
+		if (response.headersSent) response.destroy(error);
+		else sendJSON(response, statusCode, { error: error.message ?? "Checkout failed." });
 	}
 }
 
@@ -1252,6 +1505,8 @@ export const internals = {
 	buildCheckoutIndex,
 	buildCheckoutFiles,
 	createZip,
+	streamZip,
+	resolveCheckoutSelection,
 };
 
 export function createArchivatoriumServer() {
@@ -1281,6 +1536,10 @@ export function createArchivatoriumServer() {
 			await handleNavigation(request, response);
 			return;
 		}
+		if (request.method === "GET" && requestURL.pathname === "/api/tags") {
+			await handleTags(request, response);
+			return;
+		}
 		if (request.method === "GET" && requestURL.pathname === "/api/page") {
 			await handlePage(request, response);
 			return;
@@ -1291,6 +1550,10 @@ export function createArchivatoriumServer() {
 		}
 		if (request.method === "POST" && requestURL.pathname === "/api/checkout") {
 			await handleCheckout(request, response);
+			return;
+		}
+		if (request.method === "POST" && requestURL.pathname === "/api/checkout/summary") {
+			await handleCheckoutSummary(request, response);
 			return;
 		}
 
