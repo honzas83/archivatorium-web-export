@@ -332,7 +332,6 @@ function featureOptions(exportOptions) {
 		sidebar: exportOptions.sidebarOptions ?? { enabled: true },
 		customHead: exportOptions.customHeadOptions ?? { enabled: false },
 		document: exportOptions.documentOptions ?? {},
-		rss: { ...(exportOptions.rssOptions ?? {}), enabled: false },
 		linkPreview: exportOptions.linkPreviewOptions ?? { enabled: true },
 	};
 }
@@ -518,7 +517,7 @@ export async function exportMarkdownSpa({ vaultRoot, exportRoot, configPath } = 
 	await writeFile(path.join(exportRoot, "index.html"), createShell(siteName));
 	await writeFile(path.join(exportRoot, "site-lib", "metadata.json"), JSON.stringify({
 		createdTime: Date.now(), modifiedTime: Date.now(), siteName, vaultName: path.basename(vaultRoot),
-		exportRoot: "", baseURL: options.rssOptions?.siteUrl ?? "", pluginVersion: "server-markdown-spa",
+		exportRoot: "", baseURL: "", pluginVersion: "server-markdown-spa",
 		themeName: "", bodyClasses: "publish css-settings-manager show-inline-title show-ribbon is-focused", hasFavicon: false, serverMetadata: true,
 		featureOptions: featureOptions(options),
 	}));

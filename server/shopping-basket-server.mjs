@@ -85,7 +85,7 @@ function renderAttachmentDocument(data) {
 	const title = path.posix.basename(data.sourcePath ?? data.exportPath ?? "Attachment");
 	const source = `/${encodeURI(data.exportPath)}`;
 	if (String(data.exportPath).toLowerCase().endsWith(".pdf")) {
-		return `<div class="obsidian-document markdown-preview-view markdown-rendered is-readable-line-width" data-type="attachment"><div class="markdown-preview-sizer markdown-preview-section"><div class="header"><h1 class="page-title heading inline-title">${escapeHTML(title)}</h1><div class="data-bar"></div></div><iframe class="document-pdf-embed" src="${escapeHTML(source)}" title="${escapeHTML(title)}"></iframe></div></div>`;
+		return `<div class="obsidian-document markdown-preview-view markdown-rendered" data-type="attachment"><iframe class="document-pdf-embed" src="${escapeHTML(source)}" title="${escapeHTML(title)}"></iframe></div>`;
 	}
 	return `<div class="obsidian-document markdown-preview-view markdown-rendered is-readable-line-width" data-type="attachment"><div class="markdown-preview-sizer markdown-preview-section"><div class="header"><h1 class="page-title heading inline-title">${escapeHTML(title)}</h1><div class="data-bar"></div></div><p><a href="${escapeHTML(source)}">${escapeHTML(title)}</a></p></div></div>`;
 }

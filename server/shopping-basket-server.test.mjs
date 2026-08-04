@@ -96,7 +96,9 @@ Version one with complete searchable text, [[Target]], [Loose](Loose.md), ![[Att
 
 		const attachmentPageResponse = await fetch(`${baseURL}/api/page?path=attachments/report.pdf`);
 		assert.equal(attachmentPageResponse.status, 200);
-		assert.match((await attachmentPageResponse.json()).html, /class="document-pdf-embed"/);
+		const attachmentPage = await attachmentPageResponse.json();
+		assert.match(attachmentPage.html, /class="document-pdf-embed"/);
+		assert.doesNotMatch(attachmentPage.html, /markdown-preview-sizer/);
 
 		const shellResponse = await fetch(`${baseURL}/folder/document.html`);
 		assert.equal(shellResponse.status, 200);
