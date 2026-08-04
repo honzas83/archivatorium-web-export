@@ -16,7 +16,9 @@ const VAULT_ROOT = resolveVaultRoot(process.env.VAULT_ROOT || (IS_MAIN ? process
 const SERVER_ROOT = resolveServerRoot(VAULT_ROOT);
 const PUBLIC_ARCHIVE_ROOT = process.env.PUBLIC_ARCHIVE_ROOT ?? "";
 const MAX_REQUEST_BYTES = Number(process.env.MAX_CHECKOUT_BYTES ?? 1_000_000);
-const MAX_CHECKOUT_ITEMS = Number(process.env.MAX_CHECKOUT_ITEMS ?? 5000);
+const MAX_CHECKOUT_ITEMS_OVERRIDE = process.env.MAX_CHECKOUT_ITEMS;
+const DEFAULT_MAX_CHECKOUT_ITEMS = 5000;
+const MINIMUM_SEARCH_API_LIMIT = 1001;
 const CORPUS_DATABASE_PATH = resolveCorpusDatabasePath(VAULT_ROOT);
 const SEARCH_VALUE_SEPARATOR = "\u001f";
 const PAGE_CACHE_ENTRIES = Math.max(1, Number(process.env.PAGE_CACHE_ENTRIES ?? 256));
@@ -114,6 +116,18 @@ function joinSearchValues(values) {
 
 function splitSearchValues(value) {
 	return value ? String(value).split(SEARCH_VALUE_SEPARATOR) : [];
+}
+
+function getMaxCheckoutItems(metadata) {
+	const configured = MAX_CHECKOUT_ITEMS_OVERRIDE ??
+		metadata?.featureOptions?.shoppingBasket?.maxCheckoutItems ??
+		DEFAULT_MAX_CHECKOUT_ITEMS;
+	const value = Number(configured);
+	return Number.isFinite(value) ? Math.max(1, Math.trunc(value)) : DEFAULT_MAX_CHECKOUT_ITEMS;
+}
+
+async function loadBootstrapMetadata() {
+	return JSON.parse(await readFile(path.join(SERVER_ROOT, "site-lib", "metadata.json"), "utf8"));
 }
 
 async function hasGeneratedApplication() {
@@ -248,7 +262,7 @@ function normalizeNavigationParent(value) {
 }
 
 async function useDocumentTitlesInNavigation() {
-	const metadata = JSON.parse(await readFile(path.join(SERVER_ROOT, "site-lib", "metadata.json"), "utf8"));
+	const metadata = await loadBootstrapMetadata();
 	return metadata.featureOptions?.fileNavigation?.showDocumentTitles === true;
 }
 
@@ -402,8 +416,9 @@ async function handleSearch(request, response) {
 		const query = typeof body.query === "string" ? body.query.trim() : "";
 		const type = Number(body.type ?? 127);
 		const requestedLimit = Number(body.limit ?? 50);
+		const maximumLimit = Math.max(MINIMUM_SEARCH_API_LIMIT, getMaxCheckoutItems(await loadBootstrapMetadata()));
 		const limit = Number.isFinite(requestedLimit)
-			? Math.max(1, Math.min(Math.trunc(requestedLimit), 5000))
+			? Math.max(1, Math.min(Math.trunc(requestedLimit), maximumLimit))
 			: 50;
 		const tokenQuery = tokenizeSearchQuery(query);
 		const columns = searchColumnsForType(type);
@@ -873,13 +888,10 @@ function buildCheckoutIndex(bodyItems, batches, selectedSources, indexes) {
 async function buildCheckoutFiles(items, metadata, batches = []) {
 	const normalizedItems = [];
 	const seen = new Set();
+	const maxCheckoutItems = getMaxCheckoutItems(metadata);
 
 	if (!Array.isArray(items) || items.length === 0) {
 		throw Object.assign(new Error("Checkout request must include at least one item."), { statusCode: 400 });
-	}
-
-	if (items.length > MAX_CHECKOUT_ITEMS) {
-		throw Object.assign(new Error("Checkout request contains too many items."), { statusCode: 413 });
 	}
 
 	for (const item of items) {
@@ -887,6 +899,10 @@ async function buildCheckoutFiles(items, metadata, batches = []) {
 		if (seen.has(normalized.sourcePath)) continue;
 		seen.add(normalized.sourcePath);
 		normalizedItems.push(normalized);
+	}
+	if (normalizedItems.length > maxCheckoutItems) {
+		const unit = maxCheckoutItems === 1 ? "item" : "items";
+		throw Object.assign(new Error(`Checkout request exceeds the configured limit of ${maxCheckoutItems} ${unit}.`), { statusCode: 413 });
 	}
 
 	const rootIndex = await getOptionalRootIndex();

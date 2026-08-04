@@ -181,7 +181,9 @@ export class Search
 	{
 		const parsed = this.parseQueryFilter(queryString);
 		const type = parsed.type ?? allSearch;
-		const results = await this.runSearchQuery(parsed.value, type, 5000);
+		const configuredLimit = Number(ObsidianSite.metadata.featureOptions.shoppingBasket.maxCheckoutItems ?? 5000);
+		const checkoutLimit = Number.isFinite(configuredLimit) ? Math.max(1, Math.trunc(configuredLimit)) : 5000;
+		const results = await this.runSearchQuery(parsed.value, type, checkoutLimit);
 		const seen = new Set<string>();
 		const items: BasketSearchItem[] = [];
 

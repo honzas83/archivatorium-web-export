@@ -332,7 +332,12 @@ function featureOptions(exportOptions) {
 			showDocumentTitles: exportOptions.fileNavigationOptions?.showDocumentTitles === true,
 		},
 		search: { ...(exportOptions.searchOptions ?? {}), enabled: true, serverSide: true, searchEndpoint: "/api/search" },
-		shoppingBasket: exportOptions.shoppingBasketOptions ?? { enabled: true },
+		shoppingBasket: {
+			enabled: true,
+			checkoutEndpoint: "/api/checkout",
+			maxCheckoutItems: 5000,
+			...(exportOptions.shoppingBasketOptions ?? {}),
+		},
 		outline: exportOptions.outlineOptions ?? { enabled: true, minCollapseDepth: 1 },
 		themeToggle: exportOptions.themeToggleOptions ?? { enabled: true },
 		graphView: { ...(exportOptions.graphViewOptions ?? {}), enabled: false },

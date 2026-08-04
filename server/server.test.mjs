@@ -31,7 +31,12 @@ Version one with complete searchable text, [[Target]], [Loose](Loose.md), ![[Att
 	await writeFile(path.join(vaultRoot, "Archive", "Loose.md"), "# Loose\n\nLoose content.");
 	await writeFile(path.join(vaultRoot, "Attachments", "Report.pdf"), "PDF fixture");
 	const configPath = path.join(vaultRoot, ".obsidian", "plugins", "archivatorium-web-export", "data.json");
-	await writeFile(configPath, JSON.stringify({ exportOptions: { siteName: "Test archive" } }));
+	await writeFile(configPath, JSON.stringify({
+		exportOptions: {
+			siteName: "Test archive",
+			shoppingBasketOptions: { enabled: true, checkoutEndpoint: "/api/checkout", maxCheckoutItems: 1 },
+		},
+	}));
 	await exportMarkdownSpa({ vaultRoot, configPath });
 	const incompleteDatabase = new DatabaseSync(path.join(serverRoot, "corpus.sqlite"));
 	incompleteDatabase.exec("DELETE FROM export_state");
@@ -159,6 +164,18 @@ Version one with complete searchable text, [[Target]], [Loose](Loose.md), ![[Att
 		const privateCorpusResponse = await fetch(`${baseURL}/corpus.sqlite`);
 		assert.equal(privateCorpusResponse.status, 404);
 		assert.equal((await fetch(`${baseURL}/.export-files.log`)).status, 404);
+		const oversizedCheckoutResponse = await fetch(`${baseURL}/api/checkout`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({
+				items: [
+					{ sourcePath: "Folder/Document.md" },
+					{ sourcePath: "Target.md" },
+				],
+			}),
+		});
+		assert.equal(oversizedCheckoutResponse.status, 413);
+		assert.match(await oversizedCheckoutResponse.text(), /configured limit of 1 item/);
 
 		await rm(path.join(serverRoot, "index.html"));
 		const { createArchivatoriumServer: createRecoveryServer } = await import(

@@ -51,6 +51,7 @@ Inline code \`#CodeTag\` and escaped \\#EscapedTag are not tags.
 		const defaultMetadata = JSON.parse(await readFile(path.join(output, "site-lib", "metadata.json"), "utf8"));
 		assert.equal(defaultMetadata.siteName, "vault");
 		assert.equal(defaultMetadata.featureOptions.fileNavigation.showDocumentTitles, false);
+		assert.equal(defaultMetadata.featureOptions.shoppingBasket.maxCheckoutItems, 5000);
 		await rm(output, { recursive: true, force: true });
 		await mkdir(output, { recursive: true });
 		await writeFile(path.join(output, "Must-not-be-indexed.md"), "# Internal output");
