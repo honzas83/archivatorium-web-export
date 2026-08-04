@@ -1,0 +1,142 @@
+/* Standalone baseline for the server-rendered export. Obsidian normally supplies
+   these values at export time; the Node exporter deliberately has no app runtime. */
+:root {
+  --font-interface: "Avenir Next", "Segoe UI", sans-serif;
+  --font-text: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+  --font-monospace: "SFMono-Regular", Consolas, monospace;
+  --font-text-size: 16px;
+  --line-height-normal: 1.5;
+  --line-height-tight: 1.3;
+  --line-width: min(40em, calc(100vw - 2em));
+  --line-width-adaptive: var(--line-width);
+  --file-line-width: var(--line-width);
+  --sidebar-width: min(20em, 80vw);
+  --sidebar-width-left: var(--sidebar-width);
+  --sidebar-width-right: var(--sidebar-width);
+  --radius-s: 4px;
+  --radius-m: 8px;
+  --radius-l: 12px;
+  --divider-width-hover: 3px;
+  --nav-item-size: 13px;
+  --nav-item-children-margin-start: 16px;
+  --nav-item-children-margin-left: 16px;
+  --nav-item-padding: 2px 6px;
+  --hr-thickness: 1px;
+  --color-fade-speed: .2s;
+}
+
+body.theme-light {
+  --background-primary: #ffffff;
+  --background-primary-alt: #fafafa;
+  --background-secondary: #f6f6f6;
+  --background-secondary-alt: #efefef;
+  --background-modifier-border: #e0e0e0;
+  --background-modifier-hover: rgba(0, 0, 0, .067);
+  --background-modifier-active-hover: rgba(0, 0, 0, .12);
+  --text-normal: #222222;
+  --text-muted: #5c5c5c;
+  --text-faint: #ababab;
+  --text-accent: hsl(258, 88%, 48%);
+  --text-accent-hover: hsl(258, 88%, 40%);
+  --interactive-accent: hsl(258, 88%, 56%);
+  --interactive-accent-hover: hsl(258, 88%, 49%);
+  --interactive-normal: #f2f2f2;
+  --interactive-hover: #e9e9e9;
+  --interactive-success: #218739;
+  --icon-color: #666666;
+  --icon-color-hover: #222222;
+  --icon-color-focused: #222222;
+  --hr-color: #dddddd;
+  --code-background: #f5f5f5;
+  --code-normal: #333333;
+  --blockquote-border-color: #b8b8b8;
+  --callout-border-color: rgba(0, 0, 0, .15);
+  --callout-title-color: var(--text-normal);
+}
+
+body.theme-dark {
+  --background-primary: #202124;
+  --background-primary-alt: #292a2d;
+  --background-secondary: #2b2c2f;
+  --background-secondary-alt: #343538;
+  --background-modifier-border: #45464a;
+  --background-modifier-hover: rgba(255, 255, 255, .08);
+  --background-modifier-active-hover: rgba(255, 255, 255, .15);
+  --text-normal: #dcddde;
+  --text-muted: #a8a9ad;
+  --text-faint: #6d6e72;
+  --text-accent: hsl(258, 88%, 72%);
+  --text-accent-hover: hsl(258, 88%, 80%);
+  --interactive-accent: hsl(258, 88%, 66%);
+  --interactive-accent-hover: hsl(258, 88%, 74%);
+  --interactive-normal: #343538;
+  --interactive-hover: #3d3e42;
+  --interactive-success: #74c98a;
+  --icon-color: #a8a9ad;
+  --icon-color-hover: #dcddde;
+  --icon-color-focused: #dcddde;
+  --hr-color: #45464a;
+  --code-background: #292a2d;
+  --code-normal: #dcddde;
+  --blockquote-border-color: #66676a;
+  --callout-border-color: rgba(255, 255, 255, .18);
+  --callout-title-color: var(--text-normal);
+}
+
+* { box-sizing: border-box; }
+html, body, #main { min-height: 100%; margin: 0; }
+body {
+  color: var(--text-normal);
+  background: var(--background-primary);
+  font: var(--font-text-size)/var(--line-height-normal) var(--font-text);
+  overflow: hidden;
+}
+button, input, select, textarea { font: inherit; color: inherit; }
+a { color: var(--text-accent); text-decoration: none; cursor: pointer; }
+a:hover { color: var(--text-accent-hover); text-decoration: underline; }
+
+#main, #main-horizontal { height: 100vh; }
+#main-horizontal { display: flex; background: var(--background-primary); }
+.leaf { min-width: 0; }
+#center-content { flex: 1 1 auto; min-width: 0; overflow: auto; }
+.obsidian-document, .markdown-preview-view {
+  width: min(var(--line-width), calc(100% - 2em));
+  margin: 0 auto;
+  padding: 3.25rem 0 5rem;
+}
+.page-title, .inline-title { margin-top: 0; font-size: 2em; line-height: 1.2; }
+.obsidian-document h1, .obsidian-document h2, .obsidian-document h3,
+.obsidian-document h4, .obsidian-document h5, .obsidian-document h6 { line-height: 1.25; margin: 1.35em 0 .55em; }
+.obsidian-document p, .obsidian-document ul, .obsidian-document ol { margin: .75em 0; }
+.obsidian-document img { max-width: 100%; height: auto; }
+.obsidian-document pre, .obsidian-document code { font-family: var(--font-monospace); font-size: .9em; }
+.obsidian-document pre { overflow: auto; padding: 1em; border-radius: var(--radius-s); background: var(--code-background); }
+.obsidian-document :not(pre) > code { padding: .12em .3em; border-radius: var(--radius-s); background: var(--code-background); }
+.obsidian-document blockquote { margin: 1em 0; padding: .1em 1em; border-left: 3px solid var(--blockquote-border-color); color: var(--text-muted); }
+.obsidian-document hr { border: 0; border-top: var(--hr-thickness) solid var(--hr-color); margin: 2em 0; }
+.obsidian-document table { display: block; max-width: 100%; overflow: auto; border-collapse: collapse; }
+.obsidian-document th, .obsidian-document td { padding: .35em .65em; border: 1px solid var(--background-modifier-border); text-align: left; }
+.obsidian-document th { background: var(--background-secondary); }
+.callout { margin: 1em 0; padding: .8em 1em; border: 1px solid var(--callout-border-color); border-radius: var(--radius-m); background: var(--background-secondary); }
+.callout-title { font-family: var(--font-interface); font-weight: 650; color: var(--callout-title-color); }
+
+.sidebar { font-family: var(--font-interface); color: var(--text-normal); background: var(--background-secondary); }
+.sidebar .leaf-content { background: var(--background-secondary); }
+.sidebar-handle { background: var(--background-modifier-border); }
+.clickable-icon { color: var(--icon-color); border-radius: var(--radius-s); cursor: pointer; }
+.clickable-icon:hover { color: var(--icon-color-hover); background: var(--background-modifier-hover); }
+#search-wrapper { position: relative; }
+#search-wrapper input { width: 100%; padding: .45em 2em .45em .6em; border: 1px solid var(--background-modifier-border); border-radius: var(--radius-s); background: var(--background-primary); }
+#search-clear-button { position: absolute; right: .5em; top: .6em; width: .75em; height: .75em; border-radius: 50%; background: var(--text-faint); cursor: pointer; }
+.nav-files-container, .tree-container { overflow: auto; }
+.tree-item-self { min-height: 1.75em; padding: var(--nav-item-padding); border-radius: var(--radius-s); color: var(--text-normal); font-family: var(--font-interface); font-size: var(--nav-item-size); }
+.tree-item-self:hover, .tree-item-self.is-active { background: var(--background-modifier-hover); text-decoration: none; }
+.tree-item-children { margin-left: var(--nav-item-children-margin-start); }
+.search-result-container { font-family: var(--font-interface); }
+
+@media (max-width: 767px) {
+  body { overflow: auto; }
+  #main, #main-horizontal { height: auto; min-height: 100vh; }
+  #right-content { display: none; }
+  .obsidian-document, .markdown-preview-view { width: min(100% - 2em, var(--line-width)); padding-top: 4rem; }
+}
