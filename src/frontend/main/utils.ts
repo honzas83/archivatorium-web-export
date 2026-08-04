@@ -276,9 +276,32 @@ export class Ticker
 //#endregion
 
 //#region Animation
+const slideTimers = new WeakMap<HTMLElement, number>();
+
+function cancelSlide(target: HTMLElement)
+{
+	const timer = slideTimers.get(target);
+	if (timer !== undefined) window.clearTimeout(timer);
+	slideTimers.delete(target);
+	target.style.removeProperty('height');
+	target.style.removeProperty('padding-top');
+	target.style.removeProperty('padding-bottom');
+	target.style.removeProperty('margin-top');
+	target.style.removeProperty('margin-bottom');
+	target.style.removeProperty('overflow');
+	target.style.removeProperty('transition-duration');
+	target.style.removeProperty('transition-property');
+}
+
 export function slideUp(target: HTMLElement, duration: number = 500)
 {
+	cancelSlide(target);
 	if (target.style.display === 'none') return;
+	if (duration <= 0)
+	{
+		target.style.display = 'none';
+		return;
+	}
 	target.style.transitionProperty = 'height, margin, padding';
 	target.style.transitionTimingFunction = "ease-in-out";
 	target.style.transitionDuration = duration + 'ms';
@@ -291,17 +314,11 @@ export function slideUp(target: HTMLElement, duration: number = 500)
 	target.style.paddingBottom = "0";
 	target.style.marginTop = "0";
 	target.style.marginBottom = "0";
-	window.setTimeout(async () => {
-			target.style.display = 'none';
-			target.style.removeProperty('height');
-			target.style.removeProperty('padding-top');
-			target.style.removeProperty('padding-bottom');
-			target.style.removeProperty('margin-top');
-			target.style.removeProperty('margin-bottom');
-			target.style.removeProperty('overflow');
-			target.style.removeProperty('transition-duration');
-			target.style.removeProperty('transition-property');
+	const timer = window.setTimeout(() => {
+		target.style.display = 'none';
+		cancelSlide(target);
 	}, duration);
+	slideTimers.set(target, timer);
 }
 
 export function slideUpAll(targets: HTMLElement[], duration: number = 500)
@@ -340,11 +357,13 @@ export function slideUpAll(targets: HTMLElement[], duration: number = 500)
 
 export function slideDown(target: HTMLElement, duration: number = 500)
 {
+	cancelSlide(target);
 	if (window.getComputedStyle(target).display !== 'none') return;
 	target.style.removeProperty('display');
 	let display = window.getComputedStyle(target).display;
 	if (display === 'none') display = 'block';
 	target.style.display = display;
+	if (duration <= 0) return;
 	const height = target.offsetHeight;
 	target.style.overflow = 'hidden';
 	target.style.height = "0";
@@ -362,12 +381,10 @@ export function slideDown(target: HTMLElement, duration: number = 500)
 	target.style.removeProperty('padding-bottom');
 	target.style.removeProperty('margin-top');
 	target.style.removeProperty('margin-bottom');
-	window.setTimeout(async () => {
-		target.style.removeProperty('height');
-		target.style.removeProperty('overflow');
-		target.style.removeProperty('transition-duration');
-		target.style.removeProperty('transition-property');
+	const timer = window.setTimeout(() => {
+		cancelSlide(target);
 	}, duration);
+	slideTimers.set(target, timer);
 }
 
 export function slideDownAll(targets: HTMLElement[], duration: number = 500)

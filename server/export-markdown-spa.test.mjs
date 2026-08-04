@@ -21,7 +21,13 @@ citekey: Source-2026
 ---
 # Source heading
 
-Text with [[Target]] and [Report source](Report.pdf). #Topic/Child
+Text with [[Target]] and [Report source](Report.pdf). #Topic/Child #3 #1984a
+
+Inline code \`#CodeTag\` and escaped \\#EscapedTag are not tags.
+
+\`\`\`
+#FenceTag
+\`\`\`
 
 > [!abstract]
 > # Abstract heading
@@ -62,6 +68,8 @@ Text with [[Target]] and [Report source](Report.pdf). #Topic/Child
 			{ heading: "Categories/Topics", level: 2, id: "categoriestopics" },
 		]);
 		assert.deepEqual(source.data.attachments, ["folder/report.pdf"]);
+		assert.deepEqual(source.data.inlineTags, ["#Topic/Child", "#1984a"]);
+		assert.deepEqual(source.data.frontmatterTags, ["#Topic/Child"]);
 		assert.deepEqual(source.data.links.sort(), ["folder/report.pdf", "folder/target.html"]);
 		assert.match(source.search.content, /Text with Target and \[Report source\]/);
 		assert.match(source.search.content, /Trusted HTML/);
@@ -75,9 +83,12 @@ Text with [[Target]] and [Report source](Report.pdf). #Topic/Child
 		assert.doesNotMatch(shell, /obsidian\.css|main-styles\.css|server-spa\.css/);
 		assert.match(await readFile(path.join(output, "site-lib", "styles", "app.css"), "utf8"), /#search-wrapper \.search-icon/);
 		assert.match(shell, /<base href="\/">/);
+		assert.match(shell, /<link rel="icon" href="\/favicon\.png">/);
+		assert.equal((await stat(path.join(output, "favicon.png"))).size > 0, true);
 		assert.equal((shell.match(/sidebar-collapse-icon/g) ?? []).length, 2);
 		assert.equal((shell.match(/sidebar-handle/g) ?? []).length, 2);
 		assert.equal(JSON.parse(await readFile(path.join(output, "site-lib", "metadata.json"), "utf8")).serverMetadata, true);
+		assert.equal(JSON.parse(await readFile(path.join(output, "site-lib", "metadata.json"), "utf8")).hasFavicon, true);
 
 		await writeFile(config, JSON.stringify({ exportOptions: {
 			siteName: "Fixture archive",

@@ -162,6 +162,7 @@ export class WebpageDocument {
 			this.info = payload.data;
 			this.documentType = payload.data.type as DocumentType;
 			this.title = payload.data.browserTitle || payload.data.title || this.pathname;
+			await Promise.all((payload.data.backlinks ?? []).map((backlink) => ObsidianSite.getWebpageDataAsync(backlink)));
 			this.sourceHtml = new DOMParser().parseFromString(payload.html, "text/html");
 		} else {
 			const documentReq = await ObsidianSite.fetch(this.pathname);

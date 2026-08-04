@@ -60,6 +60,28 @@ Version one with complete searchable text, [[Target]], [Loose](Loose.md), ![[Att
 		assert.equal(searchResult.items.length, 1);
 		assert.equal(searchResult.items[0].sourcePath, "Folder/Document.md");
 
+		const multiwordResponse = await fetch(`${baseURL}/api/search`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ query: "complete searchable text", type: 32, limit: 50 }),
+		});
+		assert.equal(multiwordResponse.status, 200);
+		assert.deepEqual((await multiwordResponse.json()).items.map((item) => item.sourcePath), ["Folder/Document.md"]);
+
+		const reorderedResponse = await fetch(`${baseURL}/api/search`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ query: "text complete", type: 32, limit: 50 }),
+		});
+		assert.deepEqual((await reorderedResponse.json()).items.map((item) => item.sourcePath), ["Folder/Document.md"]);
+
+		const missingTermResponse = await fetch(`${baseURL}/api/search`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ query: "complete nonexistent", type: 32, limit: 50 }),
+		});
+		assert.deepEqual((await missingTermResponse.json()).items, []);
+
 		const statusResponse = await fetch(`${baseURL}/api/search/status`);
 		assert.equal(statusResponse.status, 200);
 		assert.deepEqual(await statusResponse.json(), {

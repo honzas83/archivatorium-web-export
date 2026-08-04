@@ -3,16 +3,16 @@ import { cp, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promi
 import { DatabaseSync } from "node:sqlite";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { findObsidianTags, normalizeFrontmatterTags } from "./obsidian-tags.mjs";
 
 const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPOSITORY_ROOT = path.resolve(MODULE_DIR, "..");
 const FRONTMATTER_PATTERN = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/;
 const WIKILINK_PATTERN = /(!?)\[\[([^\]|#]+)(?:#[^\]|]+)?(?:\|([^\]]+))?\]\]/g;
 const MARKDOWN_LINK_PATTERN = /(!?)\[[^\]]*\]\(((?:[^()\s]|\([^)]*\))+)(?:\s+['\"][^)]*['\"])?\)/g;
-const TAG_PATTERN = /(^|[\s(])#([\p{L}\p{N}_/-]+)/gmu;
 const SEARCH_VALUE_SEPARATOR = "\u001f";
 const EXPORT_COMMIT_INTERVAL = Math.max(1, Number(process.env.EXPORT_COMMIT_INTERVAL ?? 500));
-const RECORD_FORMAT_VERSION = "3";
+const RECORD_FORMAT_VERSION = "4";
 
 function slugifyPath(value) {
 	return value.replaceAll(" ", "-").replaceAll(/-{2,}/g, "-").toLowerCase();
@@ -106,7 +106,7 @@ function getSearchText(markdown, tags) {
 	let text = withoutExcludedCallouts(markdown.replace(FRONTMATTER_PATTERN, ""));
 	text = text.replace(/<style[\s\S]*?<\/style>|<script[\s\S]*?<\/script>/gi, " ");
 	text = text.replace(/<[^>]+>/g, " ");
-	text = text.replace(TAG_PATTERN, "$1");
+	for (const match of findObsidianTags(text).reverse()) text = `${text.slice(0, match.index)} ${text.slice(match.end)}`;
 	text = text.replace(WIKILINK_PATTERN, (_match, _embed, target, label) => label?.trim() || target);
 	text = text.replace(/!?(\[[^\]]*\])\([^)]*\)/g, "$1");
 	text = text.replace(/[`*_~>#|]/g, " ");
@@ -347,7 +347,7 @@ function createShell(siteName) {
 	const searchIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="svg-icon"><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.35-4.35"></path></svg>`;
 	const themeToggle = `<label for="theme-toggle-input" id="theme-toggle" class="theme-toggle-container" aria-label="Toggle light and dark theme"><input type="checkbox" id="theme-toggle-input" class="theme-toggle-input"><div class="toggle-background"></div></label>`;
 	return `<!doctype html>
-<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><base href="/"><title>${siteName}</title><link rel="stylesheet" href="/site-lib/styles/app.css"><script defer src="/site-lib/scripts/deferred.js"></script><script defer src="/site-lib/scripts/webpage.js"></script></head>
+<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><base href="/"><title>${siteName}</title><link rel="icon" href="/favicon.png"><link rel="stylesheet" href="/site-lib/styles/app.css"><script defer src="/site-lib/scripts/deferred.js"></script><script defer src="/site-lib/scripts/webpage.js"></script></head>
 <body class="publish css-settings-manager show-inline-title show-ribbon is-focused"><script src="/site-lib/scripts/theme-load.js"></script><div id="main"><div id="navbar"></div><div id="main-horizontal"><div id="left-content" class="leaf"><div id="left-sidebar" class="sidebar"><div class="sidebar-handle"></div><div class="sidebar-topbar"><div class="topbar-content"><div id="search-container"><div id="search-wrapper"><div class="search-icon" aria-hidden="true">${searchIcon}</div><input type="search" enterkeyhint="search" spellcheck="false" placeholder="Search..."><div id="search-clear-button" aria-label="Clear search"></div></div></div></div><div class="clickable-icon sidebar-collapse-icon">${collapseSidebarIcon}</div></div><div class="sidebar-content-wrapper"><div id="left-sidebar-content" class="leaf-content"><div id="file-explorer" class="nav-files-container"></div></div></div></div></div><div id="center-content" class="leaf"></div><div id="right-content" class="leaf"><div id="right-sidebar" class="sidebar"><div class="sidebar-handle"></div><div class="sidebar-topbar"><div class="topbar-content">${themeToggle}</div><div class="clickable-icon sidebar-collapse-icon">${collapseSidebarIcon}</div></div><div class="sidebar-content-wrapper"><div id="right-sidebar-content" class="leaf-content"></div></div></div></div></div></div></body></html>`;
 }
 
@@ -368,6 +368,7 @@ async function writeAssets(exportRoot) {
 		.join("\n\n");
 	await Promise.all([
 		writeFile(path.join(styles, "app.css"), `${appStyles}\n`),
+		cp(path.join(REPOSITORY_ROOT, "src/assets/icon.png"), path.join(exportRoot, "favicon.png")),
 		...[
 			"obsidian.css",
 			"global-variable-styles.css",
@@ -460,8 +461,8 @@ export async function exportMarkdownSpa({ vaultRoot, exportRoot, configPath } = 
 			const markdown = await readFile(document.absolutePath, "utf8");
 			const frontmatter = parseFrontmatter(markdown);
 			const headers = getHeaders(markdown);
-			const inlineTags = Array.from(markdown.matchAll(TAG_PATTERN), (match) => `#${match[2]}`);
-			const frontmatterTags = stringArray(frontmatter.values.tags).map((tag) => tag.startsWith("#") ? tag : `#${tag}`);
+			const inlineTags = findObsidianTags(markdown).map((match) => match.tag);
+			const frontmatterTags = normalizeFrontmatterTags(stringArray(frontmatter.values.tags));
 			const tags = Array.from(new Set([...frontmatterTags, ...inlineTags]));
 			const { links, attachments } = collectDocumentLinks(markdown, document, documents, basenames);
 			const aliases = stringArray(frontmatter.values.aliases);
@@ -532,7 +533,7 @@ export async function exportMarkdownSpa({ vaultRoot, exportRoot, configPath } = 
 	await writeFile(path.join(exportRoot, "site-lib", "metadata.json"), JSON.stringify({
 		createdTime: Date.now(), modifiedTime: Date.now(), siteName, vaultName: path.basename(vaultRoot),
 		exportRoot: "", baseURL: "", pluginVersion: "server-markdown-spa",
-		themeName: "", bodyClasses: "publish css-settings-manager show-inline-title show-ribbon is-focused", hasFavicon: false, serverMetadata: true,
+		themeName: "", bodyClasses: "publish css-settings-manager show-inline-title show-ribbon is-focused", hasFavicon: true, serverMetadata: true,
 		featureOptions: featureOptions(options),
 	}));
 	console.log(`[node-export] indexed ${result.writtenRecords}, reused ${result.reusedRecords}, and removed ${result.removedRecords} SQLite records (${sourcePaths.length} documents, ${attachmentRecords.size} referenced attachments)`);

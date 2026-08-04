@@ -1,7 +1,7 @@
 import MarkdownIt from "markdown-it";
+import { findObsidianTags } from "./obsidian-tags.mjs";
 
 const WIKILINK_PATTERN = /(!?)\[\[([^\]|#]+)(?:#([^\]|]+))?(?:\|([^\]]+))?\]\]/g;
-const TAG_PATTERN = /(^|[\s(])#([\p{L}\p{N}_/-]+)/gu;
 const FRONTMATTER_PATTERN = /^---\r?\n[\s\S]*?\r?\n---\r?\n?/;
 
 function escapeAttribute(value) {
@@ -207,8 +207,11 @@ export class MarkdownDocumentRenderer {
 			return `<a class="internal-link" href="${escapeAttribute(href)}">${escapeAttribute(label)}</a>`;
 		});
 
-		return withLinks.replace(TAG_PATTERN, (_match, prefix, tag) => {
-			return `${prefix}<a class="tag" href="/?query=tag:${encodeURIComponent(tag)}">#${tag}</a>`;
-		});
+		let output = withLinks;
+		for (const match of findObsidianTags(withLinks).reverse()) {
+			const link = `<a class="tag" href="/?query=tag:${encodeURIComponent(match.value)}">${match.tag}</a>`;
+			output = `${output.slice(0, match.index)}${link}${output.slice(match.end)}`;
+		}
+		return output;
 	}
 }

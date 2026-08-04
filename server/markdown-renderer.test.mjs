@@ -15,6 +15,8 @@ title: Hidden frontmatter
 [PDF link](Report.pdf)
 [Legacy tag](http://127.0.0.1:8000/?query=tag:Entities%2FOrg%2FNATO)
 
+#Valid/Tag #123 #123a \`#CodeTag\` \\#EscapedTag
+
 | Column | Value |
 | --- | --- |
 | A | B |
@@ -61,6 +63,10 @@ title: Hidden frontmatter
 	assert.match(first, /<a class="internal-link" href="target.html">Punctuated target<\/a>/);
 	assert.match(first, /<a class="internal-link attachment-link" href="assets\/report.pdf">PDF link<\/a>/);
 	assert.match(first, /<a class="tag" href="\/\?query=tag:Entities%2FOrg%2FNATO">Legacy tag<\/a>/);
+	assert.match(first, /href="\/\?query=tag:Valid%2FTag">#Valid\/Tag<\/a>/);
+	assert.match(first, /#123 /);
+	assert.match(first, /href="\/\?query=tag:123a">#123a<\/a>/);
+	assert.doesNotMatch(first, /query=tag:(?:123["&]|CodeTag|EscapedTag)/);
 	assert.match(first, /<img class="internal-embed" src="\/assets\/map.png" alt="Map.png">/);
 	assert.match(first, /<iframe class="internal-embed" src="\/assets\/report.pdf" title="Report.pdf"><\/iframe>/);
 	assert.match(first, /<table>/);
