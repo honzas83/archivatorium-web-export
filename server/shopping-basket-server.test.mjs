@@ -32,6 +32,7 @@ Version one with complete searchable text, [[Target]], [Loose](Loose.md), ![[Att
 	const configPath = path.join(vaultRoot, ".obsidian", "plugins", "archivatorium-web-export", "data.json");
 	await writeFile(configPath, JSON.stringify({ exportOptions: { siteName: "Test archive" } }));
 	await exportMarkdownSpa({ vaultRoot, exportRoot, configPath });
+	await writeFile(path.join(exportRoot, ".export-files.log"), "private progress");
 	await assert.rejects(stat(path.join(exportRoot, "site-lib", "corpus")));
 
 	process.env.EXPORT_ROOT = exportRoot;
@@ -132,6 +133,7 @@ Version one with complete searchable text, [[Target]], [Loose](Loose.md), ![[Att
 			`${baseURL}/site-lib/corpus/document.json`
 		);
 		assert.equal(privateCorpusResponse.status, 404);
+		assert.equal((await fetch(`${baseURL}/.export-files.log`)).status, 404);
 	} finally {
 		server.close();
 		await once(server, "close");

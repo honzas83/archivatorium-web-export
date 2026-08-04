@@ -71,6 +71,9 @@ Text with [[Target]] and [Report source](Report.pdf). #Topic/Child
 		await assert.rejects(stat(path.join(output, "site-lib", "corpus")));
 		const shell = await readFile(path.join(output, "index.html"), "utf8");
 		assert.match(shell, /webpage.js/);
+		assert.match(shell, /site-lib\/styles\/app\.css/);
+		assert.doesNotMatch(shell, /obsidian\.css|main-styles\.css|server-spa\.css/);
+		assert.match(await readFile(path.join(output, "site-lib", "styles", "app.css"), "utf8"), /#search-wrapper \.search-icon/);
 		assert.match(shell, /<base href="\/">/);
 		assert.equal((shell.match(/sidebar-collapse-icon/g) ?? []).length, 2);
 		assert.equal((shell.match(/sidebar-handle/g) ?? []).length, 2);

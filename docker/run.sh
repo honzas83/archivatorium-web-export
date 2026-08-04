@@ -127,9 +127,6 @@ while true; do
       if [[ -f /output/.export-progress.json ]]; then
         PROGRESS_SUMMARY=$(sed -n 's/.*"stage":"\([^"]*\)".*"completed":\([0-9]*\).*"total":\([0-9]*\).*/\1 \2 \3/p' /output/.export-progress.json)
         echo "[docker-progress] ${PROGRESS_SUMMARY:-progress file is being updated}"
-      elif [[ -f /output/.export-current-render.json ]]; then
-        CURRENT_SOURCE=$(sed -n 's/.*"sourcePath":"\([^"]*\)".*/\1/p' /output/.export-current-render.json)
-        echo "[docker-progress] rendering ${CURRENT_SOURCE:-unknown document}"
       else
         echo "[docker-progress] script is running; waiting for export progress files."
       fi
@@ -155,11 +152,6 @@ while true; do
     echo "Restarting planned export segment in ${RETRY_DELAY_SECONDS} seconds."
     sleep "$RETRY_DELAY_SECONDS"
     continue
-  fi
-
-  if [[ -f /output/.export-current-render.json ]]; then
-    LAST_RENDER_SOURCE=$(sed -n 's/.*"sourcePath":"\([^"]*\)".*/\1/p' /output/.export-current-render.json)
-    echo "[docker-debug] Last render started: ${LAST_RENDER_SOURCE:-unknown document}" >&2
   fi
 
   if [[ "$STARTUP_STALLED" == true ]] || grep -q 'Renderer process killed' "$LOG_FILE"; then

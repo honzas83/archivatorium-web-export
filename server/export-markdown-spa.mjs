@@ -347,7 +347,7 @@ function createShell(siteName) {
 	const searchIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="svg-icon"><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.35-4.35"></path></svg>`;
 	const themeToggle = `<label for="theme-toggle-input" id="theme-toggle" class="theme-toggle-container" aria-label="Toggle light and dark theme"><input type="checkbox" id="theme-toggle-input" class="theme-toggle-input"><div class="toggle-background"></div></label>`;
 	return `<!doctype html>
-<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><base href="/"><title>${siteName}</title><link rel="stylesheet" href="/site-lib/styles/obsidian.css"><link rel="stylesheet" href="/site-lib/styles/global-variable-styles.css"><link rel="stylesheet" href="/site-lib/styles/main-styles.css"><link rel="stylesheet" href="/site-lib/styles/deferred.css"><link rel="stylesheet" href="/site-lib/styles/server-spa.css"><script defer src="/site-lib/scripts/deferred.js"></script><script defer src="/site-lib/scripts/webpage.js"></script></head>
+<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><base href="/"><title>${siteName}</title><link rel="stylesheet" href="/site-lib/styles/app.css"><script defer src="/site-lib/scripts/deferred.js"></script><script defer src="/site-lib/scripts/webpage.js"></script></head>
 <body class="publish css-settings-manager show-inline-title show-ribbon is-focused"><script src="/site-lib/scripts/theme-load.js"></script><div id="main"><div id="navbar"></div><div id="main-horizontal"><div id="left-content" class="leaf"><div id="left-sidebar" class="sidebar"><div class="sidebar-handle"></div><div class="sidebar-topbar"><div class="topbar-content"><div id="search-container"><div id="search-wrapper"><div class="search-icon" aria-hidden="true">${searchIcon}</div><input type="search" enterkeyhint="search" spellcheck="false" placeholder="Search..."><div id="search-clear-button" aria-label="Clear search"></div></div></div></div><div class="clickable-icon sidebar-collapse-icon">${collapseSidebarIcon}</div></div><div class="sidebar-content-wrapper"><div id="left-sidebar-content" class="leaf-content"><div id="file-explorer" class="nav-files-container"></div></div></div></div></div><div id="center-content" class="leaf"></div><div id="right-content" class="leaf"><div id="right-sidebar" class="sidebar"><div class="sidebar-handle"></div><div class="sidebar-topbar"><div class="topbar-content">${themeToggle}</div><div class="clickable-icon sidebar-collapse-icon">${collapseSidebarIcon}</div></div><div class="sidebar-content-wrapper"><div id="right-sidebar-content" class="leaf-content"></div></div></div></div></div></div></body></html>`;
 }
 
@@ -356,17 +356,25 @@ async function writeAssets(exportRoot) {
 	const scripts = path.join(exportRoot, "site-lib", "scripts");
 	await mkdir(styles, { recursive: true });
 	await mkdir(scripts, { recursive: true });
-	const [baselineStyles, obsidianStyles, pluginStyles] = await Promise.all([
+	const [baselineStyles, obsidianStyles, pluginStyles, deferredStyles, spaStyles] = await Promise.all([
 		readFile(path.join(REPOSITORY_ROOT, "src/assets/server-default-theme.txt.css"), "utf8"),
 		readFile(path.join(REPOSITORY_ROOT, "src/assets/obsidian-styles.txt.css"), "utf8"),
 		readFile(path.join(REPOSITORY_ROOT, "src/assets/plugin-styles.txt.css"), "utf8"),
+		readFile(path.join(REPOSITORY_ROOT, "src/assets/deferred.txt.css"), "utf8"),
+		readFile(path.join(REPOSITORY_ROOT, "src/assets/server-spa-overrides.txt.css"), "utf8"),
 	]);
+	const appStyles = [baselineStyles, obsidianStyles, pluginStyles, deferredStyles, spaStyles]
+		.map((content) => content.trim())
+		.join("\n\n");
 	await Promise.all([
-		writeFile(path.join(styles, "obsidian.css"), `${baselineStyles}\n${obsidianStyles}`),
-		writeFile(path.join(styles, "global-variable-styles.css"), ""),
-		writeFile(path.join(styles, "main-styles.css"), pluginStyles),
-		cp(path.join(REPOSITORY_ROOT, "src/assets/deferred.txt.css"), path.join(styles, "deferred.css")),
-		cp(path.join(REPOSITORY_ROOT, "src/assets/server-spa-overrides.txt.css"), path.join(styles, "server-spa.css")),
+		writeFile(path.join(styles, "app.css"), `${appStyles}\n`),
+		...[
+			"obsidian.css",
+			"global-variable-styles.css",
+			"main-styles.css",
+			"deferred.css",
+			"server-spa.css",
+		].map((filename) => rm(path.join(styles, filename), { force: true })),
 		cp(path.join(REPOSITORY_ROOT, "src/assets/deferred.txt.js"), path.join(scripts, "deferred.js")),
 		cp(path.join(REPOSITORY_ROOT, "src/assets/theme-load.txt.js"), path.join(scripts, "theme-load.js")),
 		cp(path.join(REPOSITORY_ROOT, "src/frontend/dist/index.txt.js"), path.join(scripts, "webpage.js")),

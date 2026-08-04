@@ -3,9 +3,8 @@ import { Path } from "src/plugin/utils/path";
 import { ExportPreset, Settings, SettingsPage } from "src/plugin/settings/settings";
 import { Utils } from "src/plugin/utils/utils";
 import { Website } from "src/plugin/website/website";
-import { ExportLog, MarkdownRendererAPI } from "src/plugin/render-api/render-api";
+import { ExportLog } from "src/plugin/render-api/render-api";
 import { ExportInfo, ExportModal } from "src/plugin/settings/export-modal";
-import { Webpage } from "./website/webpage";
 
 export class HTMLExporter
 {
@@ -88,35 +87,23 @@ export class HTMLExporter
 			
 			if (saveFiles) 
 			{
-				if (Settings.exportOptions.combineAsSingleFile)
-				{
-					await website.saveAsCombinedHTML();
-				}
-				else
-				{
-					const newAttachments = website.index.newFiles.filter((f) => !(f instanceof Webpage));
-					const updatedAttachments = website.index.updatedFiles.filter((f) => !(f instanceof Webpage));
-					const attachmentCount =
-						newAttachments.length + updatedAttachments.length;
-					ExportLog.setRemainingOperationItems(attachmentCount);
-					ExportLog.startWorkPhase(attachmentCount);
-					await Utils.downloadAttachments(
-						newAttachments,
-						website.outputProgressWeight
-					);
-					await Utils.downloadAttachments(
-						updatedAttachments,
-						website.outputProgressWeight
-					);
+				const newAttachments = website.index.newFiles;
+				const updatedAttachments = website.index.updatedFiles;
+				const attachmentCount = newAttachments.length + updatedAttachments.length;
+				ExportLog.setRemainingOperationItems(attachmentCount);
+				ExportLog.startWorkPhase(attachmentCount);
+				await Utils.downloadAttachments(
+					newAttachments,
+					website.outputProgressWeight
+				);
+				await Utils.downloadAttachments(
+					updatedAttachments,
+					website.outputProgressWeight
+				);
 
-					if (Settings.exportPreset != ExportPreset.RawDocuments)
-					{
-						await website.index.saveWebsiteData();
-						if (!Settings.exportOptions.searchOptions.serverSide)
-						{
-							await website.index.saveIndexData();
-						}
-					}
+				if (Settings.exportPreset != ExportPreset.RawDocuments)
+				{
+					await website.index.saveWebsiteData();
 				}
 			}
 			else
@@ -135,8 +122,6 @@ export class HTMLExporter
 
 		ExportLog.setRemainingWorkItems(0, 0);
 		ExportLog.endDocumentProgress();
-		MarkdownRendererAPI.endBatch();
-
 		return website;
 	}
 

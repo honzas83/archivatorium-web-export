@@ -1070,14 +1070,12 @@ async function handleCheckout(request, response) {
 async function serveStatic(request, response) {
 	const requestURL = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
 	let pathname = decodeURIComponent(requestURL.pathname);
-	if (pathname === "/server" || pathname.startsWith("/server/") || pathname === "/.export-timings.jsonl") {
-		send(response, 404, "Not found", { "Content-Type": "text/plain; charset=utf-8" });
-		return;
-	}
 	if (
+		pathname === "/server" ||
+		pathname.startsWith("/server/") ||
 		pathname === "/.server-data" ||
 		pathname.startsWith("/.server-data/") ||
-		pathname === "/.export-progress.json" ||
+		pathname.startsWith("/.export-") ||
 		pathname === "/site-lib/corpus" ||
 		pathname.startsWith("/site-lib/corpus/")
 	) {

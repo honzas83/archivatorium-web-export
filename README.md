@@ -40,12 +40,12 @@ exporter's scope:
 - a persistent search basket for building a selected research collection
 - server-side checkout that restores original Markdown, rewrites external
   references to the public archive, and packages the selected vault as a ZIP
-- a companion server that can host the static export and keep the full search
+- a companion server that hosts the SPA and keeps the full search
   corpus outside the browser
 
-Rather than replace the upstream renderer, this fork retains its proven export
-model and specializes the surrounding indexing, navigation, media, rendering,
-and deployment pipeline for archival research.
+The current experimental architecture does not render documents in Obsidian.
+It indexes Markdown directly into SQLite and renders document HTML on demand in
+the companion server, while retaining the familiar exported interface.
 
 ## Relationship to upstream
 
@@ -61,15 +61,15 @@ features added in this fork are available in the `CHANGES-*.md` files.
 ## Highlights
 
 - Full-text search over OCR bodies, metadata, titles, aliases, headings, and tags
-- Optional server-side FTS index for collections too large for a browser index
-- File navigation, outline, graph view, tag tree, and theme switching
+- Server-side SQLite FTS for collections too large for a browser index
+- Lazy file navigation, outline, tag tree, and theme switching
 - Strict hierarchical tag filtering with in-document highlighting
 - Citekey routes for stable links into the published archive
-- Large-vault mode with bounded renderer lifetime and detailed progress metrics
-- Direct media export with hard-link fallback to copying
+- Incremental Markdown indexing based on source mtime and size
+- Direct media output without attachment text extraction
 - Search basket with persistent batches and individually selectable documents
 - Markdown checkout with local-link preservation and public-archive rewriting
-- Static hosting, search, and checkout through the bundled Node companion server
+- SPA hosting, rendering, search, and checkout through the bundled Node companion server
 
 ## Installation
 
