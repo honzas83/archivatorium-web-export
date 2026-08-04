@@ -335,7 +335,7 @@ function featureOptions(exportOptions) {
 		shoppingBasket: {
 			enabled: true,
 			checkoutEndpoint: "/api/checkout",
-			maxCheckoutItems: 5000,
+			maxCheckoutItems: 0,
 			...(exportOptions.shoppingBasketOptions ?? {}),
 		},
 		outline: exportOptions.outlineOptions ?? { enabled: true, minCollapseDepth: 1 },

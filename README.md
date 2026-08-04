@@ -179,7 +179,8 @@ The plugin writes the SPA shell, assets, and server modules under
 static HTML pages for individual notes. The companion process renders Markdown
 on demand and serves attachments directly from the vault.
 
-The Shopping Basket settings include `Maximum checkout items` (default 5000).
+The Shopping Basket settings include `Maximum checkout items` (default 0,
+meaning unlimited).
 The companion server applies this value both when collecting a search and when
 creating its checkout archive. `MAX_CHECKOUT_ITEMS` can override the exported
 setting for a particular server deployment.

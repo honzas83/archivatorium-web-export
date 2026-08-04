@@ -17,7 +17,7 @@ const SERVER_ROOT = resolveServerRoot(VAULT_ROOT);
 const PUBLIC_ARCHIVE_ROOT = process.env.PUBLIC_ARCHIVE_ROOT ?? "";
 const MAX_REQUEST_BYTES = Number(process.env.MAX_CHECKOUT_BYTES ?? 1_000_000);
 const MAX_CHECKOUT_ITEMS_OVERRIDE = process.env.MAX_CHECKOUT_ITEMS;
-const DEFAULT_MAX_CHECKOUT_ITEMS = 5000;
+const DEFAULT_MAX_CHECKOUT_ITEMS = 0;
 const MINIMUM_SEARCH_API_LIMIT = 1001;
 const CORPUS_DATABASE_PATH = resolveCorpusDatabasePath(VAULT_ROOT);
 const SEARCH_VALUE_SEPARATOR = "\u001f";
@@ -123,7 +123,9 @@ function getMaxCheckoutItems(metadata) {
 		metadata?.featureOptions?.shoppingBasket?.maxCheckoutItems ??
 		DEFAULT_MAX_CHECKOUT_ITEMS;
 	const value = Number(configured);
-	return Number.isFinite(value) ? Math.max(1, Math.trunc(value)) : DEFAULT_MAX_CHECKOUT_ITEMS;
+	if (!Number.isFinite(value)) return Number.POSITIVE_INFINITY;
+	const normalized = Math.trunc(value);
+	return normalized <= 0 ? Number.POSITIVE_INFINITY : normalized;
 }
 
 async function loadBootstrapMetadata() {
@@ -417,9 +419,10 @@ async function handleSearch(request, response) {
 		const type = Number(body.type ?? 127);
 		const requestedLimit = Number(body.limit ?? 50);
 		const maximumLimit = Math.max(MINIMUM_SEARCH_API_LIMIT, getMaxCheckoutItems(await loadBootstrapMetadata()));
-		const limit = Number.isFinite(requestedLimit)
-			? Math.max(1, Math.min(Math.trunc(requestedLimit), maximumLimit))
-			: 50;
+		const normalizedRequestedLimit = Number.isFinite(requestedLimit) ? Math.trunc(requestedLimit) : 50;
+		const limit = normalizedRequestedLimit <= 0
+			? (Number.isFinite(maximumLimit) ? maximumLimit : -1)
+			: Math.max(1, Math.min(normalizedRequestedLimit, maximumLimit));
 		const tokenQuery = tokenizeSearchQuery(query);
 		const columns = searchColumnsForType(type);
 		if (!tokenQuery || columns.length === 0) {
@@ -429,7 +432,7 @@ async function handleSearch(request, response) {
 
 		const matchQuery = `{${columns.join(" ")}} : (${tokenQuery})`;
 		const database = await getCorpusDatabase();
-		const candidateLimit = type === 8 ? Math.max(limit * 10, 1000) : limit;
+		const candidateLimit = limit < 0 ? -1 : (type === 8 ? Math.max(limit * 10, 1000) : limit);
 		let rows = database.prepare(`
 			SELECT path, source_path, title, aliases, headers, tags,
 				bm25(search_documents, 0, 0, 2, 8, 1.8, 1.5, 1.3, 1) AS rank
@@ -448,7 +451,8 @@ async function handleSearch(request, response) {
 		}
 
 		const showDocumentTitles = await useDocumentTitlesInNavigation();
-		const items = rows.slice(0, limit).map((row) => ({
+		const limitedRows = limit < 0 ? rows : rows.slice(0, limit);
+		const items = limitedRows.map((row) => ({
 			path: row.path,
 			sourcePath: row.source_path,
 			title: row.title,
@@ -900,7 +904,7 @@ async function buildCheckoutFiles(items, metadata, batches = []) {
 		seen.add(normalized.sourcePath);
 		normalizedItems.push(normalized);
 	}
-	if (normalizedItems.length > maxCheckoutItems) {
+	if (Number.isFinite(maxCheckoutItems) && normalizedItems.length > maxCheckoutItems) {
 		const unit = maxCheckoutItems === 1 ? "item" : "items";
 		throw Object.assign(new Error(`Checkout request exceeds the configured limit of ${maxCheckoutItems} ${unit}.`), { statusCode: 413 });
 	}
@@ -1234,6 +1238,7 @@ async function resolveMetadataRedirect(pathname) {
 }
 
 export const internals = {
+	getMaxCheckoutItems,
 	buildSourceIndexes,
 	normalizeVaultPath,
 	normalizeVaultFilePath,

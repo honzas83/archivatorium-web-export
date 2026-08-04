@@ -47,9 +47,11 @@ Version one with complete searchable text, [[Target]], [Loose](Loose.md), ![[Att
 
 	process.env.VAULT_ROOT = vaultRoot;
 	process.env.PUBLIC_ARCHIVE_ROOT = "https://archive.example/";
-	const { createArchivatoriumServer } = await import(
+	const { createArchivatoriumServer, internals } = await import(
 		`./server.mjs?test=${Date.now()}`
 	);
+	assert.equal(internals.getMaxCheckoutItems({ featureOptions: { shoppingBasket: { maxCheckoutItems: 0 } } }), Infinity);
+	assert.equal(internals.getMaxCheckoutItems({ featureOptions: { shoppingBasket: { maxCheckoutItems: 25 } } }), 25);
 	const server = createArchivatoriumServer();
 
 	try {
