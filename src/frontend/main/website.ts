@@ -283,7 +283,9 @@ export class ObsidianWebsite {
 	private initEvents() {
 		document.addEventListener("click", (event) => {
 			const target = event.target as Element | null;
-			const tagLink = target?.closest("a.tag") as HTMLAnchorElement | null;
+			const tagLink = target?.closest(
+				"a.tag, #tags a.tree-item-self"
+			) as HTMLAnchorElement | null;
 			if (!tagLink || event.defaultPrevented) return;
 			const href = tagLink.getAttribute("href");
 			if (!href) return;
