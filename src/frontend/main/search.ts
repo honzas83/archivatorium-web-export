@@ -1,5 +1,6 @@
 import { Shared } from "src/shared/shared";
 import { LinkHandler } from "./links";
+import { Notice } from "./notifications";
 import { getTextNodes } from "./utils";
 import MiniSearch, { SearchResult } from "minisearch";
 import { WebpageData } from "src/shared/website-data";
@@ -40,6 +41,7 @@ export class Search
 	private searchRequestId: number = 0;
 	private static readonly inlineMarkClass = "search-mark";
 	private static readonly tagMarkClass = "search-tag-mark";
+	private static readonly visibleResultLimit = 1000;
 
 	public async search(query: string, type: SearchType = allSearch)
 	{
@@ -61,11 +63,14 @@ export class Search
 		}
 
 		const requestId = ++this.searchRequestId;
-		let results = await this.runSearchQuery(query, type, type === SearchType.Tags ? 5000 : 200);
+		let results = await this.runSearchQuery(query, type, Search.visibleResultLimit + 1);
 		if (requestId !== this.searchRequestId) return;
 
-		// clamp results to at most the top 50
-		if (type !== SearchType.Tags && results.length > 50) results.splice(50);
+		if (results.length > Search.visibleResultLimit)
+		{
+			results = results.slice(0, Search.visibleResultLimit);
+			new Notice("Showing the first 1,000 results. Refine the search to narrow it down.");
+		}
 		
 		// filter results for the best matches and generate extra metadata
 		const showPaths: string[] = [];

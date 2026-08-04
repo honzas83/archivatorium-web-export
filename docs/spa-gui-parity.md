@@ -11,10 +11,11 @@ theme assets.
 - Expanding and collapsing a folder updates its chevron immediately.
 - A `tag:` search expands the complete matching hierarchy and loads every
   matching leaf without requiring manual collapse and re-expansion.
-- A tag search and a full-text search show every matching document up to the
-  visible result limit, including lower-ranked exact matches. They highlight
-  matching content in the open document and scroll to its first match. Tag
-  links use the tag highlight treatment from the static export.
+- A tag search and a full-text search show the first 1,000 matching documents,
+  including lower-ranked exact matches. When more matches exist, a notice
+  states that the visible-result limit was reached. Results highlight matching
+  content in the open document and scroll to its first match. Tag links use
+  the tag highlight treatment from the static export.
 - Direct document URLs, browser back/forward navigation, Markdown links, and
   tag links keep the SPA loaded and update the current document.
 - A PDF link replaces the Markdown document in the center pane while both
