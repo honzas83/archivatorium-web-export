@@ -12,5 +12,5 @@ export function resolveServerRoot(vaultRoot) {
 }
 
 export function resolveCorpusDatabasePath(vaultRoot) {
-	return path.join(resolveServerRoot(vaultRoot), ".server-data", "corpus.sqlite");
+	return path.join(resolveServerRoot(vaultRoot), "corpus.sqlite");
 }

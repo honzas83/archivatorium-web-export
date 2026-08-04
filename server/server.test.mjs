@@ -33,11 +33,11 @@ Version one with complete searchable text, [[Target]], [Loose](Loose.md), ![[Att
 	const configPath = path.join(vaultRoot, ".obsidian", "plugins", "archivatorium-web-export", "data.json");
 	await writeFile(configPath, JSON.stringify({ exportOptions: { siteName: "Test archive" } }));
 	await exportMarkdownSpa({ vaultRoot, configPath });
-	const incompleteDatabase = new DatabaseSync(path.join(serverRoot, ".server-data", "corpus.sqlite"));
+	const incompleteDatabase = new DatabaseSync(path.join(serverRoot, "corpus.sqlite"));
 	incompleteDatabase.exec("DELETE FROM export_state");
 	incompleteDatabase.close();
 	await writeFile(path.join(serverRoot, ".export-files.log"), "private progress");
-	assert.equal((await stat(path.join(serverRoot, ".server-data", "corpus.sqlite"))).isFile(), true);
+	assert.equal((await stat(path.join(serverRoot, "corpus.sqlite"))).isFile(), true);
 	await assert.rejects(stat(path.join(serverRoot, "site-lib", "corpus")));
 
 	process.env.VAULT_ROOT = vaultRoot;
@@ -63,7 +63,7 @@ Version one with complete searchable text, [[Target]], [Loose](Loose.md), ![[Att
 		const searchResult = await searchResponse.json();
 		assert.equal(searchResult.items.length, 1);
 		assert.equal(searchResult.items[0].sourcePath, "Folder/Document.md");
-		assert.equal((await stat(path.join(serverRoot, ".server-data", "corpus.sqlite"))).isFile(), true);
+		assert.equal((await stat(path.join(serverRoot, "corpus.sqlite"))).isFile(), true);
 
 		const multiwordResponse = await fetch(`${baseURL}/api/search`, {
 			method: "POST",
@@ -156,9 +156,7 @@ Version one with complete searchable text, [[Target]], [Loose](Loose.md), ![[Att
 		assert.equal(redirectResponse.status, 302);
 		assert.equal(redirectResponse.headers.get("location"), "/folder/document.html");
 
-		const privateCorpusResponse = await fetch(
-			`${baseURL}/site-lib/corpus/document.json`
-		);
+		const privateCorpusResponse = await fetch(`${baseURL}/corpus.sqlite`);
 		assert.equal(privateCorpusResponse.status, 404);
 		assert.equal((await fetch(`${baseURL}/.export-files.log`)).status, 404);
 	} finally {

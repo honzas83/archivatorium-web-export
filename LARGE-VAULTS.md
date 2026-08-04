@@ -15,7 +15,7 @@ embed binary attachments in memory.
 - Run the exported companion server with Node 24.
 
 Server-side search preserves the complete indexed OCR text. The Node exporter
-writes metadata and FTS rows directly to `.server-data/corpus.sqlite`; it does
+writes metadata and FTS rows directly to `.archivatorium/corpus.sqlite`; it does
 not create an intermediate JSON corpus. Page records contain metadata and
 full-text fields, while referenced attachments contain metadata only. The
 database is never served over HTTP.

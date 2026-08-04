@@ -4,7 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { findObsidianTags, normalizeFrontmatterTags } from "./obsidian-tags.mjs";
-import { resolveServerRoot, resolveVaultRoot, SERVER_DIRECTORY_NAME } from "./vault-layout.mjs";
+import { resolveCorpusDatabasePath, resolveServerRoot, resolveVaultRoot, SERVER_DIRECTORY_NAME } from "./vault-layout.mjs";
 
 const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPOSITORY_ROOT = path.resolve(MODULE_DIR, "..");
@@ -396,9 +396,7 @@ export async function exportMarkdownSpa({ vaultRoot, configPath, writeApplicatio
 	}
 	const options = config.exportOptions ?? {};
 	await mkdir(exportRoot, { recursive: true });
-	const databaseRoot = path.join(exportRoot, ".server-data");
-	await mkdir(databaseRoot, { recursive: true });
-	const database = createDirectDatabase(path.join(databaseRoot, "corpus.sqlite"));
+	const database = createDirectDatabase(resolveCorpusDatabasePath(vaultRoot));
 	const recordStore = createRecordStore(database);
 
 	const allSourcePaths = await walkFiles(vaultRoot);

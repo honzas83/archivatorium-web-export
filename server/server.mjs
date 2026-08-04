@@ -17,7 +17,6 @@ const SERVER_ROOT = resolveServerRoot(VAULT_ROOT);
 const PUBLIC_ARCHIVE_ROOT = process.env.PUBLIC_ARCHIVE_ROOT ?? "";
 const MAX_REQUEST_BYTES = Number(process.env.MAX_CHECKOUT_BYTES ?? 1_000_000);
 const MAX_CHECKOUT_ITEMS = Number(process.env.MAX_CHECKOUT_ITEMS ?? 5000);
-const SEARCH_DATA_ROOT = path.join(SERVER_ROOT, ".server-data");
 const CORPUS_DATABASE_PATH = resolveCorpusDatabasePath(VAULT_ROOT);
 const SEARCH_VALUE_SEPARATOR = "\u001f";
 const PAGE_CACHE_ENTRIES = Math.max(1, Number(process.env.PAGE_CACHE_ENTRIES ?? 256));
@@ -1091,8 +1090,8 @@ async function serveStatic(request, response) {
 	if (
 		pathname === "/server" ||
 		pathname.startsWith("/server/") ||
-		pathname === "/.server-data" ||
-		pathname.startsWith("/.server-data/") ||
+		pathname === "/corpus.sqlite" ||
+		pathname.startsWith("/corpus.sqlite-") ||
 		pathname.startsWith("/.export-") ||
 		pathname === "/site-lib/corpus" ||
 		pathname.startsWith("/site-lib/corpus/")

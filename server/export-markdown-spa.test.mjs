@@ -57,7 +57,7 @@ Inline code \`#CodeTag\` and escaped \\#EscapedTag are not tags.
 
 		const firstExport = await exportMarkdownSpa({ vaultRoot: vault, configPath: config });
 		assert.equal(firstExport.writtenRecords, 3);
-		const database = new DatabaseSync(path.join(output, ".server-data", "corpus.sqlite"));
+		const database = new DatabaseSync(path.join(output, "corpus.sqlite"));
 		const records = database.prepare("SELECT payload FROM source_records").all().map((row) => JSON.parse(row.payload));
 		database.close();
 		const source = records.find((record) => record.data?.sourcePath === "Folder/Source.md");

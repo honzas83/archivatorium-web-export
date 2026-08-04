@@ -179,7 +179,7 @@ The plugin writes the SPA shell, assets, and server modules under
 static HTML pages for individual notes. The companion process renders Markdown
 on demand and serves attachments directly from the vault.
 
-When `.archivatorium/.server-data/corpus.sqlite` is missing, server startup
+When `.archivatorium/corpus.sqlite` is missing, server startup
 indexes the vault before opening the listening port. Later page rendering uses
 the source Markdown directly and validates its cache by source `mtime` and
 size.
