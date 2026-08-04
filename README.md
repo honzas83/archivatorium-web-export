@@ -191,7 +191,7 @@ VAULT=/srv/archivatorium-vault
 PUBLIC_ARCHIVE_ROOT=https://archive.example.org/ \
 HOST=127.0.0.1 \
 PORT=8000 \
-node server/shopping-basket-server.mjs "$VAULT"
+node server/server.mjs "$VAULT"
 ```
 
 The generated copy can be run from the vault after installing its single
@@ -199,7 +199,7 @@ runtime dependency:
 
 ```bash
 npm install --prefix "$VAULT/.archivatorium/server"
-node "$VAULT/.archivatorium/server/shopping-basket-server.mjs" "$VAULT"
+node "$VAULT/.archivatorium/server/server.mjs" "$VAULT"
 ```
 
 Place an authenticating reverse proxy in front of the checkout endpoint. The

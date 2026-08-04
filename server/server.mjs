@@ -1194,7 +1194,7 @@ export const internals = {
 	createZip,
 };
 
-export function createShoppingBasketServer() {
+export function createArchivatoriumServer() {
 	return createServer(async (request, response) => {
 		const requestURL = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
 		if (request.method === "GET" && requestURL.pathname === "/api/search/status") {
@@ -1245,7 +1245,7 @@ export function createShoppingBasketServer() {
 
 if (IS_MAIN) {
 	getCorpusDatabase().then(() => {
-		const server = createShoppingBasketServer();
+		const server = createArchivatoriumServer();
 		server.listen(PORT, HOST, () => {
 			console.log(`Archivatorium server listening on http://${HOST}:${PORT}`);
 			console.log(`Serving vault ${VAULT_ROOT}`);

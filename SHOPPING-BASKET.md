@@ -11,7 +11,7 @@ VAULT=/path/to/original/vault
 PUBLIC_ARCHIVE_ROOT=https://archive.example.org/ \
 HOST=127.0.0.1 \
 PORT=8000 \
-node server/shopping-basket-server.mjs "$VAULT"
+node server/server.mjs "$VAULT"
 ```
 
 The checkout endpoint is `POST /api/checkout`. It expects:

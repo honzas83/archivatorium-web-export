@@ -5,7 +5,7 @@ import { Utils } from "src/plugin/utils/utils";
 import { Website } from "src/plugin/website/website";
 import { ExportLog } from "src/plugin/render-api/render-api";
 import { ExportInfo, ExportModal } from "src/plugin/settings/export-modal";
-import { mkdir } from "fs/promises";
+import { mkdir, rm } from "fs/promises";
 
 export class HTMLExporter
 {
@@ -16,6 +16,7 @@ export class HTMLExporter
 	{
 		const serverRoot = Path.vaultPath.joinString(this.serverDirectoryName).absolute();
 		await mkdir(serverRoot.pathname, { recursive: true });
+		await rm(serverRoot.joinString("server/shopping-basket-server.mjs").pathname, { force: true });
 		Settings.exportOptions.exportPath = serverRoot.path;
 		return serverRoot;
 	}

@@ -41,10 +41,10 @@ Version one with complete searchable text, [[Target]], [Loose](Loose.md), ![[Att
 
 	process.env.VAULT_ROOT = vaultRoot;
 	process.env.PUBLIC_ARCHIVE_ROOT = "https://archive.example/";
-	const { createShoppingBasketServer } = await import(
-		`./shopping-basket-server.mjs?test=${Date.now()}`
+	const { createArchivatoriumServer } = await import(
+		`./server.mjs?test=${Date.now()}`
 	);
-	const server = createShoppingBasketServer();
+	const server = createArchivatoriumServer();
 
 	try {
 		server.listen(0, "127.0.0.1");
