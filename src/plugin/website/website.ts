@@ -149,6 +149,7 @@ export class Website
 		this.webpageSourceFiles = [];
 		this.directAttachmentSourcePaths.clear();
 		this.fileTreeOrderBySourcePath.clear();
+		await this.clearCurrentRender();
 		// Indexing is intentionally excluded from export progress. It prepares
 		// the workload, while the measured work starts with the optional file
 		// tree and continues through page and attachment output.
@@ -367,13 +368,18 @@ export class Website
 	public async build(files?: TFile[]): Promise<Website | undefined>
 	{
 		if (files) await this.load(files);
+		await this.writeProgress("preparing-spa-shell", 0, 3);
 		this.exportTimingRows = [];
 		this.exportTimingSequence = 0;
 		await this.destination.joinString(this.exportTimingPath).write("");
+		await this.writeProgress("preparing-spa-shell", 1, 3);
 
 		console.log(`Creating website with ${this.sourceFiles.length} files.`);
 
+		console.log("[export-phase] building SPA shell");
 		await this.buildTemplate();
+		console.log("[export-phase] SPA shell ready");
+		await this.writeProgress("preparing-spa-shell", 2, 3);
 		await this.writeProgress("rendering-and-writing-pages", 0, this.webpageSourceFiles.length);
 		
 		// this.refreshUpdatedFilesList();

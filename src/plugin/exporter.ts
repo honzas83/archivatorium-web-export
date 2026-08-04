@@ -51,7 +51,6 @@ export class HTMLExporter
 	public static async exportFiles(files: TFile[], destination: Path, saveFiles: boolean, deleteOld: boolean) : Promise<Website | undefined>
 	{
 		HTMLExporter.lastExportSucceeded = false;
-		MarkdownRendererAPI.beginBatch();
 		let website = undefined;
 		try
 		{
