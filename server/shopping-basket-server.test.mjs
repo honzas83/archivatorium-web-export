@@ -1,113 +1,36 @@
 import assert from "node:assert/strict";
 import { once } from "node:events";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { exportMarkdownSpa } from "./export-markdown-spa.mjs";
 
-test("server indexes the unified corpus and keeps it private", async () => {
+test("server opens the direct SQLite export and keeps legacy corpus paths private", async () => {
 	const testRoot = await mkdtemp(path.join(tmpdir(), "obsidian-export-search-"));
 	const exportRoot = path.join(testRoot, "export");
 	const vaultRoot = path.join(testRoot, "vault");
-	const corpusRoot = path.join(exportRoot, "site-lib", "corpus");
-	await mkdir(corpusRoot, { recursive: true });
 	await mkdir(vaultRoot, { recursive: true });
-	await writeFile(path.join(exportRoot, "index.html"), "<!doctype html><main id='shell'>Test SPA shell</main>");
+	await mkdir(path.join(vaultRoot, ".obsidian", "plugins", "archivatorium-web-export"), { recursive: true });
 	await mkdir(path.join(vaultRoot, "Folder"), { recursive: true });
 	await mkdir(path.join(vaultRoot, "Attachments"), { recursive: true });
 	await writeFile(path.join(vaultRoot, "Folder", "Document.md"), `---
 tags: Topic/Child
+citekey: example2026
 ---
 # Document title
 
-Version one with [[Target]], ![[Attachments/Report.pdf]] and #Topic/Child.
+Version one with complete searchable text, [[Target]], ![[Attachments/Report.pdf]] and #Topic/Child.
 
 > [!info] Metadata
 > <span class="trusted">trusted HTML</span>
 `);
 	await writeFile(path.join(vaultRoot, "Target.md"), "# Target\n\nTarget content.");
 	await writeFile(path.join(vaultRoot, "Attachments", "Report.pdf"), "PDF fixture");
-	await writeFile(path.join(exportRoot, "site-lib", "metadata.json"), JSON.stringify({
-		serverMetadata: true,
-	}));
-	await writeFile(path.join(corpusRoot, "document.json"), JSON.stringify({
-		kind: "webpage",
-		data: {
-			createdTime: 0,
-			modifiedTime: 0,
-			sourceSize: 0,
-			sourcePath: "Folder/Document.md",
-			exportPath: "folder/document.html",
-			showInTree: true,
-			treeOrder: 0,
-			backlinks: [],
-			type: "markdown",
-			data: null,
-			title: "Document title",
-			aliases: ["Example alias"],
-			inlineTags: ["Topic/Child"],
-			frontmatterTags: [],
-			headers: [],
-			links: [],
-			attachments: [],
-			pathToRoot: ".",
-			icon: "",
-			description: "",
-			author: "",
-			coverImageURL: "",
-			fullURL: "",
-		},
-		redirectValues: ["example2026"],
-		search: {
-			metadata: "citekey example2026",
-			headers: ["Relevant heading"],
-			content: "Complete searchable text remains available.",
-		},
-	}));
-	await writeFile(path.join(corpusRoot, "target.json"), JSON.stringify({
-		kind: "webpage",
-		data: {
-			createdTime: 0,
-			modifiedTime: 0,
-			sourceSize: 0,
-			sourcePath: "Target.md",
-			exportPath: "target.html",
-			showInTree: true,
-			treeOrder: 1,
-			backlinks: ["folder/document.html"],
-			type: "markdown",
-			data: null,
-			title: "Target",
-			aliases: [],
-			inlineTags: [],
-			frontmatterTags: [],
-			headers: [],
-			links: [],
-			attachments: [],
-			pathToRoot: ".",
-			icon: "",
-			description: "",
-			author: "",
-			coverImageURL: "",
-			fullURL: "",
-		},
-		search: { metadata: "", headers: ["Target"], content: "Target content." },
-	}));
-	await writeFile(path.join(corpusRoot, "attachment.json"), JSON.stringify({
-		kind: "file",
-		data: {
-			createdTime: 0,
-			modifiedTime: 0,
-			sourceSize: 0,
-			sourcePath: "Attachments/Report.pdf",
-			exportPath: "attachments/report.pdf",
-			showInTree: false,
-			treeOrder: 0,
-			backlinks: [],
-			type: "attachment",
-			data: null,
-		},
-	}));
+	const configPath = path.join(vaultRoot, ".obsidian", "plugins", "archivatorium-web-export", "data.json");
+	await writeFile(configPath, JSON.stringify({ exportOptions: { siteName: "Test archive" } }));
+	await exportMarkdownSpa({ vaultRoot, exportRoot, configPath });
+	await assert.rejects(stat(path.join(exportRoot, "site-lib", "corpus")));
 
 	process.env.EXPORT_ROOT = exportRoot;
 	process.env.VAULT_ROOT = vaultRoot;
@@ -170,7 +93,7 @@ Version one with [[Target]], ![[Attachments/Report.pdf]] and #Topic/Child.
 
 		const shellResponse = await fetch(`${baseURL}/folder/document.html`);
 		assert.equal(shellResponse.status, 200);
-		assert.match(await shellResponse.text(), /Test SPA shell/);
+		assert.match(await shellResponse.text(), /webpage.js/);
 
 		await writeFile(path.join(vaultRoot, "Folder", "Document.md"), "# Document title\n\nVersion two.");
 		const updatedPageResponse = await fetch(`${baseURL}/api/page?path=folder/document.html`);

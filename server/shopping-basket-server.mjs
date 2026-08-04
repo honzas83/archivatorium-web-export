@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { createServer } from "node:http";
 import { createReadStream } from "node:fs";
-import { mkdir, readFile, readdir, stat } from "node:fs/promises";
+import { readFile, readdir, stat } from "node:fs/promises";
 import { DatabaseSync } from "node:sqlite";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -18,11 +18,9 @@ const EXPORT_ROOT = process.env.EXPORT_ROOT
 const PUBLIC_ARCHIVE_ROOT = process.env.PUBLIC_ARCHIVE_ROOT ?? "";
 const MAX_REQUEST_BYTES = Number(process.env.MAX_CHECKOUT_BYTES ?? 1_000_000);
 const MAX_CHECKOUT_ITEMS = Number(process.env.MAX_CHECKOUT_ITEMS ?? 5000);
-const CORPUS_ROOT = path.join(EXPORT_ROOT, "site-lib", "corpus");
 const SEARCH_DATA_ROOT = path.join(EXPORT_ROOT, ".server-data");
 const CORPUS_DATABASE_PATH = path.join(SEARCH_DATA_ROOT, "corpus.sqlite");
 const SEARCH_VALUE_SEPARATOR = "\u001f";
-const INDEX_COMMIT_INTERVAL = Math.max(1, Number(process.env.INDEX_COMMIT_INTERVAL ?? 500));
 const PAGE_CACHE_ENTRIES = Math.max(1, Number(process.env.PAGE_CACHE_ENTRIES ?? 256));
 let corpusDatabasePromise;
 let navigationSnapshotPromise;
@@ -100,158 +98,24 @@ function splitSearchValues(value) {
 	return value ? String(value).split(SEARCH_VALUE_SEPARATOR) : [];
 }
 
-function logIndexProgress(name, status, filename) {
-	console.log(`[companion-${name}] ${status.processed}/${status.total} ${filename}`);
-}
-
-function commitIndexBatch(database, name, status) {
-	database.exec("COMMIT");
-	console.log(`[companion-${name}] committed ${status.processed}/${status.total}`);
-	database.exec("BEGIN IMMEDIATE");
-}
-
 async function initializeCorpusDatabase() {
-	corpusStatus.state = "indexing";
-	corpusStatus.processed = 0;
-	await mkdir(SEARCH_DATA_ROOT, { recursive: true });
+	corpusStatus.state = "opening";
+	if (!(await stat(CORPUS_DATABASE_PATH)).isFile()) {
+		throw new Error(`Direct SQLite export not found: ${CORPUS_DATABASE_PATH}`);
+	}
 	const database = new DatabaseSync(CORPUS_DATABASE_PATH);
-	database.exec(`
-		PRAGMA journal_mode = WAL;
-		PRAGMA synchronous = NORMAL;
-		CREATE VIRTUAL TABLE IF NOT EXISTS search_documents USING fts5(
-			path, source_path UNINDEXED, title, metadata, aliases, headers, tags, content,
-			tokenize = 'unicode61 remove_diacritics 2'
-		);
-		CREATE TABLE IF NOT EXISTS metadata_documents (
-			export_path TEXT PRIMARY KEY, source_path TEXT NOT NULL, kind TEXT NOT NULL,
-			title TEXT, inline_tags TEXT, frontmatter_tags TEXT, show_in_tree INTEGER NOT NULL,
-			tree_order INTEGER NOT NULL, type TEXT, data TEXT NOT NULL
-		);
-		CREATE TABLE IF NOT EXISTS metadata_redirects (
-			value TEXT PRIMARY KEY, export_path TEXT NOT NULL
-		);
-		CREATE TABLE IF NOT EXISTS corpus_state (
-			filename TEXT PRIMARY KEY, export_path TEXT NOT NULL, modified_time REAL NOT NULL, size INTEGER NOT NULL,
-			source_modified_time REAL, source_size INTEGER
-		);
-		CREATE INDEX IF NOT EXISTS metadata_documents_source_path ON metadata_documents(source_path);
-		CREATE INDEX IF NOT EXISTS metadata_documents_tree ON metadata_documents(show_in_tree, tree_order);
-	`);
-	for (const column of ["source_modified_time REAL", "source_size INTEGER"]) {
-		try {
-			database.exec(`ALTER TABLE corpus_state ADD COLUMN ${column}`);
-		} catch (error) {
-			if (!String(error?.message).includes("duplicate column name")) throw error;
-		}
-	}
-
-	const knownRecords = new Map(database.prepare(
-		"SELECT filename, export_path, modified_time, size, source_modified_time, source_size FROM corpus_state"
-	).all().map((record) => [record.filename, record]));
-	const deleteMetadata = database.prepare("DELETE FROM metadata_documents WHERE export_path = ?");
-	const deleteRedirects = database.prepare("DELETE FROM metadata_redirects WHERE export_path = ?");
-	const deleteSearch = database.prepare("DELETE FROM search_documents WHERE path = ?");
-	const deleteState = database.prepare("DELETE FROM corpus_state WHERE filename = ?");
-	const insertMetadata = database.prepare(`
-		INSERT OR REPLACE INTO metadata_documents(
-			export_path, source_path, kind, title, inline_tags, frontmatter_tags,
-			show_in_tree, tree_order, type, data
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`);
-	const insertRedirect = database.prepare(
-		"INSERT OR IGNORE INTO metadata_redirects(value, export_path) VALUES (?, ?)"
-	);
-	const insertSearch = database.prepare(`
-		INSERT INTO search_documents(path, source_path, title, metadata, aliases, headers, tags, content)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-	`);
-	const updateState = database.prepare(`
-		INSERT OR REPLACE INTO corpus_state(
-			filename, export_path, modified_time, size, source_modified_time, source_size
-		) VALUES (?, ?, ?, ?, ?, ?)
-	`);
-
-	let entries = [];
 	try {
-		entries = await readdir(CORPUS_ROOT, { withFileTypes: true });
+		const mode = database.prepare("SELECT value FROM export_state WHERE key = 'mode'").get()?.value;
+		if (mode !== "direct-markdown-spa") throw new Error("SQLite database was not created by the direct Markdown SPA exporter.");
+		corpusStatus.total = Number(database.prepare("SELECT COUNT(*) AS count FROM source_records").get().count);
+		corpusStatus.processed = corpusStatus.total;
+		corpusStatus.state = "ready";
+		console.log(`[companion-sqlite] opened ${corpusStatus.total} direct records from ${CORPUS_DATABASE_PATH}`);
 	} catch (error) {
-		if (error?.code !== "ENOENT") throw error;
-	}
-	const corpusEntries = entries.filter((entry) => entry.isFile() && entry.name.endsWith(".json"));
-	corpusStatus.total = corpusEntries.length;
-	console.log(`[companion-corpus] indexing ${corpusStatus.total} files from ${CORPUS_ROOT}`);
-	const seen = new Set();
-
-	database.exec("BEGIN IMMEDIATE");
-	try {
-		for (const entry of corpusEntries) {
-			seen.add(entry.name);
-			corpusStatus.processed++;
-			logIndexProgress("corpus", corpusStatus, entry.name);
-			const recordPath = path.join(CORPUS_ROOT, entry.name);
-			const recordStat = await stat(recordPath);
-			const previous = knownRecords.get(entry.name);
-			const record = JSON.parse(await readFile(recordPath, "utf8"));
-			const data = record?.data;
-			const sourceModifiedTime = Number(data?.modifiedTime ?? recordStat.mtimeMs);
-			const sourceSize = Number(data?.sourceSize ?? recordStat.size);
-			const recordChanged = previous?.modified_time !== recordStat.mtimeMs || previous?.size !== recordStat.size;
-			const sourceChanged = previous?.source_modified_time !== sourceModifiedTime || previous?.source_size !== sourceSize;
-			if (recordChanged || sourceChanged) {
-				if (data?.exportPath && data?.sourcePath) {
-					if (previous?.export_path) {
-						deleteMetadata.run(previous.export_path);
-						deleteRedirects.run(previous.export_path);
-						deleteSearch.run(previous.export_path);
-					}
-					deleteMetadata.run(data.exportPath);
-					deleteRedirects.run(data.exportPath);
-					deleteSearch.run(data.exportPath);
-					insertMetadata.run(
-						data.exportPath, data.sourcePath, record.kind ?? "file", data.title ?? data.exportPath,
-						joinSearchValues(data.inlineTags), joinSearchValues(data.frontmatterTags),
-						data.showInTree ? 1 : 0, Number(data.treeOrder ?? 0), String(data.type ?? ""), JSON.stringify(data)
-					);
-					for (const value of record.redirectValues ?? []) {
-						if (typeof value === "string" && value) insertRedirect.run(value, data.exportPath);
-					}
-					if (record.kind === "webpage" && record.search) {
-						const tags = [
-							...new Set([...(data.frontmatterTags ?? []), ...(data.inlineTags ?? [])]),
-						];
-						insertSearch.run(
-							data.exportPath, data.sourcePath, data.title ?? data.exportPath,
-							record.search.metadata ?? "", joinSearchValues(data.aliases),
-							joinSearchValues(record.search.headers), joinSearchValues(tags), record.search.content ?? ""
-						);
-					}
-					updateState.run(
-						entry.name, data.exportPath, recordStat.mtimeMs, recordStat.size,
-						sourceModifiedTime, sourceSize
-					);
-				}
-			}
-			if (corpusStatus.processed % INDEX_COMMIT_INTERVAL === 0) {
-				commitIndexBatch(database, "corpus", corpusStatus);
-			}
-		}
-		for (const [filename, previous] of knownRecords) {
-			if (seen.has(filename)) continue;
-			deleteMetadata.run(previous.export_path);
-			deleteRedirects.run(previous.export_path);
-			deleteSearch.run(previous.export_path);
-			deleteState.run(filename);
-		}
-		database.exec("COMMIT");
-	} catch (error) {
-		database.exec("ROLLBACK");
 		database.close();
 		corpusStatus.state = "error";
 		throw error;
 	}
-
-	corpusStatus.state = "ready";
-	console.log(`[companion-corpus] ready: ${corpusStatus.processed}/${corpusStatus.total}`);
 	return database;
 }
 
@@ -1337,9 +1201,9 @@ export function createShoppingBasketServer() {
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-	getCorpusDatabase().catch((error) => {
-		console.error("Corpus index initialization failed:", error);
-	});
+getCorpusDatabase().catch((error) => {
+	console.error("Direct SQLite initialization failed:", error);
+});
 	const server = createShoppingBasketServer();
 	server.listen(PORT, HOST, () => {
 		console.log(`Shopping basket server listening on http://${HOST}:${PORT}`);

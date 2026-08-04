@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-import { createHash } from "node:crypto";
 import { cp, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { DatabaseSync } from "node:sqlite";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -9,6 +9,8 @@ const REPOSITORY_ROOT = path.resolve(MODULE_DIR, "..");
 const FRONTMATTER_PATTERN = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/;
 const WIKILINK_PATTERN = /(!?)\[\[([^\]|#]+)(?:#[^\]|]+)?(?:\|([^\]]+))?\]\]/g;
 const TAG_PATTERN = /(^|[\s(])#([\p{L}\p{N}_/-]+)/gmu;
+const SEARCH_VALUE_SEPARATOR = "\u001f";
+const EXPORT_COMMIT_INTERVAL = Math.max(1, Number(process.env.EXPORT_COMMIT_INTERVAL ?? 500));
 
 function slugifyPath(value) {
 	return value.replaceAll(" ", "-").replaceAll(/-{2,}/g, "-").toLowerCase();
@@ -121,23 +123,140 @@ async function walkFiles(vaultRoot, relative = "") {
 	return files;
 }
 
-async function readExistingCorpus(corpusRoot) {
+function joinSearchValues(values) {
+	return Array.isArray(values) ? values.map(String).join(SEARCH_VALUE_SEPARATOR) : "";
+}
+
+function createDirectDatabase(databasePath) {
+	const database = new DatabaseSync(databasePath);
+	database.exec(`
+		PRAGMA journal_mode = WAL;
+		PRAGMA synchronous = NORMAL;
+		CREATE VIRTUAL TABLE IF NOT EXISTS search_documents USING fts5(
+			path, source_path UNINDEXED, title, metadata, aliases, headers, tags, content,
+			tokenize = 'unicode61 remove_diacritics 2'
+		);
+		CREATE TABLE IF NOT EXISTS metadata_documents (
+			export_path TEXT PRIMARY KEY, source_path TEXT NOT NULL, kind TEXT NOT NULL,
+			title TEXT, inline_tags TEXT, frontmatter_tags TEXT, show_in_tree INTEGER NOT NULL,
+			tree_order INTEGER NOT NULL, type TEXT, data TEXT NOT NULL
+		);
+		CREATE TABLE IF NOT EXISTS metadata_redirects (
+			value TEXT PRIMARY KEY, export_path TEXT NOT NULL
+		);
+		CREATE TABLE IF NOT EXISTS source_records (
+			filename TEXT PRIMARY KEY, export_path TEXT NOT NULL, source_modified_time REAL NOT NULL,
+			source_size INTEGER NOT NULL, payload TEXT NOT NULL
+		);
+		CREATE TABLE IF NOT EXISTS export_state (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+		CREATE INDEX IF NOT EXISTS metadata_documents_source_path ON metadata_documents(source_path);
+		CREATE INDEX IF NOT EXISTS metadata_documents_tree ON metadata_documents(show_in_tree, tree_order);
+	`);
+	const mode = database.prepare("SELECT value FROM export_state WHERE key = 'mode'").get()?.value;
+	if (mode !== "direct-markdown-spa") {
+		database.exec(`
+			DELETE FROM search_documents;
+			DELETE FROM metadata_documents;
+			DELETE FROM metadata_redirects;
+			DELETE FROM source_records;
+		`);
+	}
+	return database;
+}
+
+function readExistingRecords(database) {
 	const records = new Map();
-	try {
-		const entries = await readdir(corpusRoot, { withFileTypes: true });
-		for (const entry of entries) {
-			if (!entry.isFile() || !entry.name.endsWith(".json")) continue;
-			const serialized = await readFile(path.join(corpusRoot, entry.name), "utf8");
-			try {
-				records.set(entry.name, { serialized, record: JSON.parse(serialized) });
-			} catch {
-				// A damaged record is replaced by the next export.
-			}
+	for (const row of database.prepare("SELECT filename, payload FROM source_records").all()) {
+		try {
+			records.set(row.filename, { serialized: row.payload, record: JSON.parse(row.payload) });
+		} catch {
+			// A damaged record is replaced by the next export.
 		}
-	} catch (error) {
-		if (error?.code !== "ENOENT") throw error;
 	}
 	return records;
+}
+
+function createDirectIndexWriter(database, existingRecords) {
+	const deleteMetadata = database.prepare("DELETE FROM metadata_documents WHERE export_path = ?");
+	const deleteRedirects = database.prepare("DELETE FROM metadata_redirects WHERE export_path = ?");
+	const deleteSearch = database.prepare("DELETE FROM search_documents WHERE path = ?");
+	const deleteSourceRecord = database.prepare("DELETE FROM source_records WHERE filename = ?");
+	const insertMetadata = database.prepare(`
+		INSERT OR REPLACE INTO metadata_documents(
+			export_path, source_path, kind, title, inline_tags, frontmatter_tags,
+			show_in_tree, tree_order, type, data
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`);
+	const insertRedirect = database.prepare("INSERT OR IGNORE INTO metadata_redirects(value, export_path) VALUES (?, ?)");
+	const insertSearch = database.prepare(`
+		INSERT INTO search_documents(path, source_path, title, metadata, aliases, headers, tags, content)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	`);
+	const insertSourceRecord = database.prepare(`
+		INSERT OR REPLACE INTO source_records(filename, export_path, source_modified_time, source_size, payload)
+		VALUES (?, ?, ?, ?, ?)
+	`);
+	const generated = new Set();
+	let writtenRecords = 0;
+	let reusedRecords = 0;
+	let removedRecords = 0;
+
+	function removeExportPath(exportedPath) {
+		deleteMetadata.run(exportedPath);
+		deleteRedirects.run(exportedPath);
+		deleteSearch.run(exportedPath);
+	}
+
+	database.exec("BEGIN IMMEDIATE");
+	function writeRecord(filename, record) {
+		generated.add(filename);
+		const serialized = JSON.stringify(record);
+		if (existingRecords.get(filename)?.serialized === serialized) {
+			reusedRecords++;
+			return;
+		}
+		const previous = existingRecords.get(filename)?.record?.data;
+		const data = record.data;
+		if (previous?.exportPath) removeExportPath(previous.exportPath);
+		removeExportPath(data.exportPath);
+		insertMetadata.run(
+			data.exportPath, data.sourcePath, record.kind ?? "file", data.title ?? data.exportPath,
+			joinSearchValues(data.inlineTags), joinSearchValues(data.frontmatterTags),
+			data.showInTree ? 1 : 0, Number(data.treeOrder ?? 0), String(data.type ?? ""), JSON.stringify(data)
+		);
+		for (const value of record.redirectValues ?? []) {
+			if (typeof value === "string" && value) insertRedirect.run(value, data.exportPath);
+		}
+		if (record.kind === "webpage" && record.search) {
+			const tags = [...new Set([...(data.frontmatterTags ?? []), ...(data.inlineTags ?? [])])];
+			insertSearch.run(
+				data.exportPath, data.sourcePath, data.title ?? data.exportPath,
+				record.search.metadata ?? "", joinSearchValues(data.aliases),
+				joinSearchValues(record.search.headers), joinSearchValues(tags), record.search.content ?? ""
+			);
+		}
+		insertSourceRecord.run(filename, data.exportPath, data.modifiedTime, data.sourceSize, serialized);
+		writtenRecords++;
+		if (writtenRecords % EXPORT_COMMIT_INTERVAL === 0) {
+			database.exec("COMMIT");
+			console.log(`[node-export] committed ${writtenRecords} changed records`);
+			database.exec("BEGIN IMMEDIATE");
+		}
+	}
+
+	function finish() {
+		for (const [filename, existing] of existingRecords) {
+			if (generated.has(filename)) continue;
+			if (existing.record?.data?.exportPath) removeExportPath(existing.record.data.exportPath);
+			deleteSourceRecord.run(filename);
+			removedRecords++;
+		}
+		database.prepare("INSERT OR REPLACE INTO export_state(key, value) VALUES ('mode', 'direct-markdown-spa')").run();
+		database.exec("COMMIT");
+		return { writtenRecords, reusedRecords, removedRecords };
+	}
+
+	return { writeRecord, finish };
 }
 
 function isCurrentSourceRecord(record, sourcePath, sourceStat) {
@@ -162,8 +281,8 @@ function resolveWikiTarget(rawTarget, sourcePath, documents, basenames) {
 	return undefined;
 }
 
-function corpusFilename(exportPath) {
-	return `${createHash("sha256").update(exportPath).digest("hex")}.json`;
+function recordKey(exportPath) {
+	return exportPath;
 }
 
 function featureOptions(exportOptions) {
@@ -217,10 +336,11 @@ export async function exportMarkdownSpa({ vaultRoot, exportRoot, configPath } = 
 	const settingsPath = configPath ?? path.join(vaultRoot, ".obsidian/plugins/archivatorium-web-export/data.json");
 	const config = JSON.parse(await readFile(settingsPath, "utf8"));
 	const options = config.exportOptions ?? {};
-	const corpusRoot = path.join(exportRoot, "site-lib", "corpus");
 	await mkdir(exportRoot, { recursive: true });
-	await mkdir(corpusRoot, { recursive: true });
-	const existingCorpus = await readExistingCorpus(corpusRoot);
+	const databaseRoot = path.join(exportRoot, ".server-data");
+	await mkdir(databaseRoot, { recursive: true });
+	const database = createDirectDatabase(path.join(databaseRoot, "corpus.sqlite"));
+	const existingRecords = readExistingRecords(database);
 
 	const allSourcePaths = await walkFiles(vaultRoot);
 	const sourcePaths = allSourcePaths.filter((sourcePath) => sourcePath.toLowerCase().endsWith(".md"))
@@ -232,7 +352,7 @@ export async function exportMarkdownSpa({ vaultRoot, exportRoot, configPath } = 
 		const sourceStat = await stat(absolutePath);
 		const document = { sourcePath, absolutePath, sourceStat, exportPath: exportPath(sourcePath) };
 		if (sourcePath.toLowerCase().endsWith(".md")) {
-			const existing = existingCorpus.get(corpusFilename(document.exportPath));
+			const existing = existingRecords.get(recordKey(document.exportPath));
 			if (isCurrentSourceRecord(existing?.record, sourcePath, sourceStat)) document.cachedRecord = existing.record;
 			else document.markdown = await readFile(absolutePath, "utf8");
 		}
@@ -289,21 +409,7 @@ export async function exportMarkdownSpa({ vaultRoot, exportRoot, configPath } = 
 		}
 	}
 
-	const generatedFilenames = new Set();
-	let writtenRecords = 0;
-	let reusedRecords = 0;
-	let removedRecords = 0;
-	async function writeRecord(exportedPath, record) {
-		const filename = corpusFilename(exportedPath);
-		generatedFilenames.add(filename);
-		const serialized = JSON.stringify(record);
-		if (existingCorpus.get(filename)?.serialized === serialized) {
-			reusedRecords++;
-			return;
-		}
-		await writeFile(path.join(corpusRoot, filename), serialized);
-		writtenRecords++;
-	}
+	const indexWriter = createDirectIndexWriter(database, existingRecords);
 
 	for (const entry of pageRecords) {
 		const { document, links, attachments, treeOrder } = entry;
@@ -347,7 +453,7 @@ export async function exportMarkdownSpa({ vaultRoot, exportRoot, configPath } = 
 				search: { metadata: frontmatter.text, headers: headers.map((header) => header.heading), content },
 			};
 		}
-		await writeRecord(document.exportPath, record);
+		indexWriter.writeRecord(recordKey(document.exportPath), record);
 	}
 
 	for (const attachment of attachmentRecords.values()) {
@@ -363,13 +469,11 @@ export async function exportMarkdownSpa({ vaultRoot, exportRoot, configPath } = 
 			type: "attachment",
 			data: null,
 		};
-		await writeRecord(data.exportPath, { kind: "file", data });
+		indexWriter.writeRecord(recordKey(data.exportPath), { kind: "file", data });
 	}
-	for (const filename of existingCorpus.keys()) {
-		if (generatedFilenames.has(filename)) continue;
-		await rm(path.join(corpusRoot, filename), { force: true });
-		removedRecords++;
-	}
+	const result = indexWriter.finish();
+	database.close();
+	await rm(path.join(exportRoot, "site-lib", "corpus"), { recursive: true, force: true });
 
 	const siteName = options.siteName || path.basename(vaultRoot);
 	await writeAssets(exportRoot);
@@ -380,8 +484,8 @@ export async function exportMarkdownSpa({ vaultRoot, exportRoot, configPath } = 
 		themeName: "", bodyClasses: "", hasFavicon: false, serverMetadata: true,
 		featureOptions: featureOptions(options),
 	}));
-	console.log(`[node-export] wrote ${writtenRecords}, reused ${reusedRecords}, and removed ${removedRecords} corpus records (${pageRecords.length} documents, ${attachmentRecords.size} referenced attachments)`);
-	return { writtenRecords, reusedRecords, removedRecords, documents: pageRecords.length, attachments: attachmentRecords.size };
+	console.log(`[node-export] indexed ${result.writtenRecords}, reused ${result.reusedRecords}, and removed ${result.removedRecords} SQLite records (${pageRecords.length} documents, ${attachmentRecords.size} referenced attachments)`);
+	return { ...result, documents: pageRecords.length, attachments: attachmentRecords.size };
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

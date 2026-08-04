@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { DatabaseSync } from "node:sqlite";
 import path from "node:path";
 import test from "node:test";
 import { exportMarkdownSpa } from "./export-markdown-spa.mjs";
@@ -37,10 +38,9 @@ Text with [[Target]] and ![[Report.pdf]]. #Topic/Child
 	try {
 		const firstExport = await exportMarkdownSpa({ vaultRoot: vault, exportRoot: output, configPath: config });
 		assert.equal(firstExport.writtenRecords, 3);
-		const corpusRoot = path.join(output, "site-lib", "corpus");
-		const records = await Promise.all((await readdir(corpusRoot)).map(async (filename) =>
-			JSON.parse(await readFile(path.join(corpusRoot, filename), "utf8"))
-		));
+		const database = new DatabaseSync(path.join(output, ".server-data", "corpus.sqlite"));
+		const records = database.prepare("SELECT payload FROM source_records").all().map((row) => JSON.parse(row.payload));
+		database.close();
 		const source = records.find((record) => record.data?.sourcePath === "Folder/Source.md");
 		const attachment = records.find((record) => record.data?.sourcePath === "Folder/Report.pdf");
 		assert.equal(source.data.exportPath, "folder/source.html");
@@ -52,6 +52,7 @@ Text with [[Target]] and ![[Report.pdf]]. #Topic/Child
 		assert.doesNotMatch(source.search.content, /Metadata should not be searchable|Citation should not be searchable|#Topic\/Child|<span>/);
 		assert.equal(attachment.kind, "file");
 		assert.equal(attachment.data.exportPath, "folder/report.pdf");
+		await assert.rejects(stat(path.join(output, "site-lib", "corpus")));
 		const shell = await readFile(path.join(output, "index.html"), "utf8");
 		assert.match(shell, /webpage.js/);
 		assert.equal((shell.match(/sidebar-collapse-icon/g) ?? []).length, 2);
