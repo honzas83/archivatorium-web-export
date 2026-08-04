@@ -12,7 +12,19 @@ test("server indexes the unified corpus and keeps it private", async () => {
 	const corpusRoot = path.join(exportRoot, "site-lib", "corpus");
 	await mkdir(corpusRoot, { recursive: true });
 	await mkdir(vaultRoot, { recursive: true });
-	await writeFile(path.join(exportRoot, "index.html"), "<!doctype html><title>Test</title>");
+	await writeFile(path.join(exportRoot, "index.html"), "<!doctype html><main id='shell'>Test SPA shell</main>");
+	await mkdir(path.join(vaultRoot, "Folder"), { recursive: true });
+	await writeFile(path.join(vaultRoot, "Folder", "Document.md"), `---
+tags: Topic/Child
+---
+# Document title
+
+Version one with [[Target]] and #Topic/Child.
+
+> [!info] Metadata
+> <span class="trusted">trusted HTML</span>
+`);
+	await writeFile(path.join(vaultRoot, "Target.md"), "# Target\n\nTarget content.");
 	await writeFile(path.join(exportRoot, "site-lib", "metadata.json"), JSON.stringify({
 		serverMetadata: true,
 	}));
@@ -50,6 +62,35 @@ test("server indexes the unified corpus and keeps it private", async () => {
 			content: "Complete searchable text remains available.",
 		},
 	}));
+	await writeFile(path.join(corpusRoot, "target.json"), JSON.stringify({
+		kind: "webpage",
+		data: {
+			createdTime: 0,
+			modifiedTime: 0,
+			sourceSize: 0,
+			sourcePath: "Target.md",
+			exportPath: "target.html",
+			showInTree: true,
+			treeOrder: 1,
+			backlinks: ["folder/document.html"],
+			type: "markdown",
+			data: null,
+			title: "Target",
+			aliases: [],
+			inlineTags: [],
+			frontmatterTags: [],
+			headers: [],
+			links: [],
+			attachments: [],
+			pathToRoot: ".",
+			icon: "",
+			description: "",
+			author: "",
+			coverImageURL: "",
+			fullURL: "",
+		},
+		search: { metadata: "", headers: ["Target"], content: "Target content." },
+	}));
 
 	process.env.EXPORT_ROOT = exportRoot;
 	process.env.VAULT_ROOT = vaultRoot;
@@ -80,9 +121,35 @@ test("server indexes the unified corpus and keeps it private", async () => {
 		assert.equal(statusResponse.status, 200);
 		assert.deepEqual(await statusResponse.json(), {
 			state: "ready",
-			processed: 1,
-			total: 1,
+			processed: 2,
+			total: 2,
 		});
+
+		const bootstrapResponse = await fetch(`${baseURL}/api/app/bootstrap`);
+		assert.equal(bootstrapResponse.status, 200);
+		assert.equal((await bootstrapResponse.json()).navigationMode, "lazy");
+
+		const rootNavigation = await fetch(`${baseURL}/api/navigation`);
+		assert.deepEqual((await rootNavigation.json()).items.map((item) => item.path), ["Folder", "Target.md"]);
+		const folderNavigation = await fetch(`${baseURL}/api/navigation?parent=Folder`);
+		assert.deepEqual((await folderNavigation.json()).items.map((item) => item.exportPath), ["folder/document.html"]);
+
+		const pageResponse = await fetch(`${baseURL}/api/page?path=folder/document.html`);
+		assert.equal(pageResponse.status, 200);
+		const page = await pageResponse.json();
+		assert.equal(page.data.sourcePath, "Folder/Document.md");
+		assert.match(page.html, /Version one/);
+		assert.match(page.html, /class="trusted"/);
+		assert.match(page.html, /href="target.html"/);
+		assert.match(page.html, /data-callout="info"/);
+
+		const shellResponse = await fetch(`${baseURL}/folder/document.html`);
+		assert.equal(shellResponse.status, 200);
+		assert.match(await shellResponse.text(), /Test SPA shell/);
+
+		await writeFile(path.join(vaultRoot, "Folder", "Document.md"), "# Document title\n\nVersion two.");
+		const updatedPageResponse = await fetch(`${baseURL}/api/page?path=folder/document.html`);
+		assert.match((await updatedPageResponse.json()).html, /Version two/);
 
 		const tagResponse = await fetch(`${baseURL}/api/search`, {
 			method: "POST",

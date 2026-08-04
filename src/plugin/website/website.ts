@@ -16,6 +16,7 @@ import { ThemeToggle } from "src/plugin/features/theme-toggle";
 import { SearchInput } from "src/plugin/features/search-input";
 import { Utils } from "src/plugin/utils/utils";
 import { appendFile, mkdir, rename, unlink, writeFile } from "fs/promises";
+import { createMarkdownCorpusRecord } from "./markdown-corpus";
 
 
 export class Website
@@ -78,15 +79,22 @@ export class Website
 		// inject file tree
 		if (this.exportOptions.fileNavigationOptions.enabled)
 		{
-			const fileTreeElContainer = document.body.createDiv();
-			fileTreeElContainer.innerHTML = this.fileTreeAsset.getHTML(this.exportOptions);
-			const fileTreeEl = fileTreeElContainer.firstElementChild as HTMLElement;
+			if (this.exportOptions.searchOptions.serverSide)
+			{
+				template.insertLazyFileExplorer(this.exportOptions.fileNavigationOptions);
+			}
+			else
+			{
+				const fileTreeElContainer = document.body.createDiv();
+				fileTreeElContainer.innerHTML = this.fileTreeAsset.getHTML(this.exportOptions);
+				const fileTreeEl = fileTreeElContainer.firstElementChild as HTMLElement;
 
-			template.insertFeature(fileTreeEl, this.exportOptions.fileNavigationOptions);
-			fileTreeElContainer.remove();
-			// The template now owns the generated markup; the construction tree can be collected.
-			// @ts-ignore
-			this.fileTree = undefined;
+				template.insertFeature(fileTreeEl, this.exportOptions.fileNavigationOptions);
+				fileTreeElContainer.remove();
+				// The template now owns the generated markup; the construction tree can be collected.
+				// @ts-ignore
+				this.fileTree = undefined;
+			}
 		}
 
 		// inject custom head content
@@ -166,6 +174,7 @@ export class Website
 		const useLargeVaultMode = true;
 		this.exportOptions.combineAsSingleFile = false;
 		this.exportOptions.searchOptions.serverSide = true;
+		this.fileTreeProgressBudget = 0;
 		if (this.exportOptions.rssOptions.enabled)
 		{
 			this.exportOptions.rssOptions.enabled = false;
@@ -257,6 +266,15 @@ export class Website
 			// create file tree asset
 			if (this.exportOptions.fileNavigationOptions.enabled)
 			{
+				if (this.exportOptions.searchOptions.serverSide)
+				{
+					this.webpageSourceFiles.forEach((file, index) =>
+					{
+						this.fileTreeOrderBySourcePath.set(file.path, index + 1);
+					});
+					await this.writeProgress("file-tree-complete", initializedFiles, this.sourceFiles.length);
+					return this;
+				}
 				const rootPrefix = this.exportOptions.exportRoot
 					? `${this.exportOptions.exportRoot}/`
 					: "";
@@ -359,7 +377,8 @@ export class Website
 		// 	});
 		// }
 
-		await MarkdownRendererAPI.beginBatch(this.exportOptions);
+		const directMarkdownCorpus = this.exportOptions.searchOptions.serverSide;
+		if (!directMarkdownCorpus) await MarkdownRendererAPI.beginBatch(this.exportOptions);
 		this.validateSettings();
 
 		const webpageFiles = this.webpageSourceFiles;
@@ -421,6 +440,32 @@ export class Website
 			{
 				await this.flushExportTimings();
 				return;
+			}
+			if (directMarkdownCorpus)
+			{
+				const targetPath = this.getTargetPathForFile(sourceFile, sourceFile.name);
+				targetPath.setExtension("html");
+				if (await this.index.isMarkdownCorpusCurrent(targetPath.path, sourceFile.stat.mtime, sourceFile.stat.size))
+				{
+					console.log(`[export-resume] ${sourceFile.path}`);
+					await completeDocument(`Reused ${sourceFile.path}`);
+					continue;
+				}
+				ExportLog.setProgress(0, "Building Markdown Corpus", sourceFile.path);
+				await this.writeCurrentRender(sourceFile.path);
+				const recordStart = performance.now();
+				const record = await createMarkdownCorpusRecord(sourceFile, this, webpage.treeOrder);
+				await this.index.recordMarkdownCorpus(record);
+				await this.clearCurrentRender();
+				this.recordExportTiming({
+					renderMs: performance.now() - recordStart,
+					indexMs: 0,
+					writeMs: 0,
+					failed: false,
+					sourcePath: sourceFile.path,
+				});
+				await completeDocument(sourceFile.path);
+				continue;
 			}
 			if (await this.index.isGeneratedWebpageCurrent(webpage))
 			{
@@ -531,6 +576,10 @@ export class Website
 		try
 		{
 			await this.index.finalize();
+			if (directMarkdownCorpus)
+			{
+				await this.destination.joinString("index.html").write(this.webpageTemplate.getHTML());
+			}
 			await this.writeProgress("finalizing", progress, webpageFiles.length);
 		}
 		catch (error)

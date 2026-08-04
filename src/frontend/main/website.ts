@@ -27,6 +27,7 @@ import { BacklinkList } from "./backlinks";
 import { Tags } from "./tags";
 import { Aliases } from "./aliases";
 import { ShoppingBasket } from "./shopping-basket";
+import { LazyNavigation } from "./lazy-navigation";
 
 type Constructor<T> = new () => T;
 
@@ -53,6 +54,7 @@ export class ObsidianWebsite {
 	public metadata: WebsiteData;
 	public theme: Theme;
 	public fileTree: Tree | undefined = undefined;
+	public lazyNavigation: LazyNavigation | undefined = undefined;
 	public outlineTree: Tree | undefined = undefined;
 	public search: Search | undefined = undefined;
 	public leftSidebar: Sidebar | undefined = undefined;
@@ -124,7 +126,11 @@ export class ObsidianWebsite {
 
 		this.createLoadingEl();
 
-		if (fileTreeEl) this.fileTree = new Tree(fileTreeEl);
+		if (fileTreeEl && this.metadata.navigationMode === "lazy") {
+			this.lazyNavigation = new LazyNavigation(fileTreeEl, this.metadata.siteName ?? "Files");
+			await this.lazyNavigation.initialize();
+			this.fileTree = this.lazyNavigation.tree;
+		} else if (fileTreeEl) this.fileTree = new Tree(fileTreeEl);
 		if (outlineTreeEl) this.outlineTree = new Tree(outlineTreeEl, this.metadata.featureOptions.outline.minCollapseDepth);
 		if (leftSidebarEl) this.leftSidebar = new Sidebar(leftSidebarEl);
 		if (rightSidebarEl) this.rightSidebar = new Sidebar(rightSidebarEl);
@@ -145,9 +151,17 @@ export class ObsidianWebsite {
 		const pathname = this.resolveWebpagePath(requestedPathname) ?? metadataPathname;
 		this.entryPage = pathname;
 
-		this.document = await new ObsidianDocument(pathname);
-		await this.document.loadChildDocuments();
-		await this.document.postLoadInit();
+		const initialDocument = new ObsidianDocument(pathname);
+		const loadedDocument = this.metadata.serverMetadata && this.isHttp
+			? await initialDocument.load()
+			: initialDocument;
+		if (!loadedDocument) return;
+		this.document = loadedDocument;
+		if (!(this.metadata.serverMetadata && this.isHttp)) {
+			await this.document.loadChildDocuments();
+			await this.document.postLoadInit();
+		}
+		await this.lazyNavigation?.revealDocument(this.document.info.sourcePath, this.document.pathname);
 
 		if (
 			!ObsidianSite.metadata.ignoreMetadata &&
@@ -262,6 +276,7 @@ export class ObsidianWebsite {
 
 		this.isLoaded = true;
 		this.onloadCallbacks.forEach((cb) => cb(this.document));
+		await this.document.show();
 	}
 
 	private initEvents() {
@@ -315,11 +330,13 @@ export class ObsidianWebsite {
 			return this.document;
 		}
 
-		const data = await ObsidianSite.getWebpageDataAsync(url);
-		if (!data && !this.metadata.serverMetadata) {
-			new Notice("This page does not exist yet.");
-			console.warn("Page does not exist", url);
-			return undefined;
+		if (!this.metadata.serverMetadata) {
+			const data = await ObsidianSite.getWebpageDataAsync(url);
+			if (!data) {
+				new Notice("This page does not exist yet.");
+				console.warn("Page does not exist", url);
+				return undefined;
+			}
 		}
 
 		const page = await new ObsidianDocument(url).load();
@@ -342,6 +359,7 @@ export class ObsidianWebsite {
 
 		// Update graph view and file tree
 		await this.graphView?.showGraph([page.pathname]);
+		await this.lazyNavigation?.revealDocument(page.info.sourcePath, page.pathname);
 		this.fileTree?.findByPath(page.pathname)?.setActive();
 		this.fileTree?.revealPath(page.pathname);
 		this.graphView?.setActiveNodeByPath(page.pathname);
@@ -435,10 +453,10 @@ export class ObsidianWebsite {
 					Shared.libFolderName + "/metadata.json"
 				);
 				if (dataReq.ok) {
-					const jsonStr = await dataReq.text();
-					const data = WebsiteData.fromJSON(jsonStr);
-					if (data.serverMetadata) {
-						const bootstrapReq = await fetch("/api/metadata/bootstrap");
+				const jsonStr = await dataReq.text();
+				const data = WebsiteData.fromJSON(jsonStr);
+				if (data.serverMetadata) {
+					const bootstrapReq = await fetch("/api/app/bootstrap");
 						if (!bootstrapReq.ok) throw new Error("Failed to load server metadata bootstrap.");
 						return WebsiteData.fromJSON(JSON.stringify(await bootstrapReq.json()));
 					}

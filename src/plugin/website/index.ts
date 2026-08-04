@@ -15,7 +15,7 @@ import { FileData, TagTreeItemData, WebpageData, WebsiteData } from "src/shared/
 import { Utils } from "src/plugin/utils/utils";
 import { Shared } from "src/shared/shared";
 import { WebpageTemplate } from "./webpage-template";
-import { ServerCorpus } from "./server-corpus";
+import { ServerCorpus, ServerCorpusRecord } from "./server-corpus";
 import { mkdir, rename, writeFile } from "fs/promises";
 
 export class Index
@@ -964,6 +964,19 @@ export class Index
 	public async recordGeneratedWebpage(webpage: Webpage): Promise<void>
 	{
 		await this.updateWebpage(webpage);
+	}
+
+	/** Persist a Markdown-derived record without constructing an Obsidian render DOM. */
+	public async recordMarkdownCorpus(record: ServerCorpusRecord): Promise<void>
+	{
+		if (!this.usesServerMetadata()) throw new Error("Markdown corpus requires server metadata mode.");
+		await this.serverCorpus.write(record);
+	}
+
+	public async isMarkdownCorpusCurrent(exportPath: string, modifiedTime: number, sourceSize: number): Promise<boolean>
+	{
+		if (!this.usesServerMetadata()) return false;
+		return await this.serverCorpus.isCurrent(exportPath, modifiedTime, sourceSize);
 	}
 
 	public async isGeneratedWebpageCurrent(webpage: Webpage): Promise<boolean>

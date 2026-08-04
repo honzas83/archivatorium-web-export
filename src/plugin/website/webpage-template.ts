@@ -135,6 +135,18 @@ export class WebpageTemplate
 		return this.doc.documentElement.innerHTML;
 	}
 
+	public getHTML(): string
+	{
+		return `<!DOCTYPE html>\n${this.doc.documentElement.outerHTML}`;
+	}
+
+	/** Insert the empty shell that the server-backed file tree fills after load. */
+	public insertLazyFileExplorer(featureOptions: InsertedFeatureOptions): void
+	{
+		const explorer = this.doc.createDiv({ attr: { id: "file-explorer", class: "nav-files-container" } });
+		this.insertFeature(explorer, featureOptions);
+	}
+
 	private static readonly ignoreClasses = ["publish", "css-settings-manager", "theme-light", "theme-dark"];
 	public static async getValidBodyClasses(): Promise<string>
 	{

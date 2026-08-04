@@ -176,6 +176,8 @@ export class WebsiteOptions
 
 export class WebsiteData
 {
+	/** Present when the companion server supplies the file tree lazily. */
+	navigationMode?: "lazy";
 	ignoreMetadata: boolean = false;
 	serverMetadata: boolean = false;
 	metadataShards?: {

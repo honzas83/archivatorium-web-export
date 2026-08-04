@@ -146,27 +146,32 @@ export class WebpageDocument {
 		this.isPreview = isPreview;
 
 		if (!this.pathname || !this.exists) return this;
-		if (ObsidianSite.metadata.serverMetadata) {
-			const metadata = await ObsidianSite.getWebpageDataAsync(this.pathname);
-			if (metadata) {
-				this.info = metadata;
-				this.documentType = metadata.type as DocumentType;
-				this.title = metadata.title ?? this.pathname;
-			}
-		}
-
 		let oldDocument = ObsidianSite.document;
 		await ObsidianSite.showLoading(true, containerEl);
 
 		this.containerEl = containerEl;
 
-		const documentReq = await ObsidianSite.fetch(this.pathname);
-		if (documentReq?.ok) {
-			const documentText = await documentReq.text();
-			this.sourceHtml = new DOMParser().parseFromString(
-				documentText,
-				"text/html"
-			);
+		if (ObsidianSite.metadata.serverMetadata && ObsidianSite.isHttp) {
+			const documentReq = await fetch(`/api/page?path=${encodeURIComponent(this.pathname)}`);
+			if (!documentReq.ok) {
+				new Notice("This document could not be loaded.");
+				console.error("Failed to load document", this.pathname);
+				return undefined;
+			}
+			const payload = await documentReq.json() as { data: WebpageData, html: string };
+			this.info = payload.data;
+			this.documentType = payload.data.type as DocumentType;
+			this.title = payload.data.title ?? this.pathname;
+			this.sourceHtml = new DOMParser().parseFromString(payload.html, "text/html");
+		} else {
+			const documentReq = await ObsidianSite.fetch(this.pathname);
+			if (!documentReq?.ok) {
+				new Notice("This document could not be loaded.");
+				console.error("Failed to load document", this.pathname);
+				return undefined;
+			}
+			this.sourceHtml = new DOMParser().parseFromString(await documentReq.text(), "text/html");
+		}
 
 			let newDocumentEl = this.sourceHtml.querySelector(".obsidian-document");
 
@@ -195,11 +200,6 @@ export class WebpageDocument {
 			}
 
 			this.initialized = false;
-		} else {
-			new Notice("This document could not be loaded.");
-			console.error("Failed to load document", this.pathname);
-			return undefined;
-		}
 
 		return this;
 	}

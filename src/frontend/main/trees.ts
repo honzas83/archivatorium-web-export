@@ -423,4 +423,16 @@ export class Tree extends TreeItem
 		if (!item) return;
 		item.collapsed = false;
 	}
+
+	/** Add a lazily fetched item while preserving the existing tree behavior. */
+	public appendItem(parent: TreeItem, itemEl: HTMLElement): TreeItem
+	{
+		parent.childrenEl.appendChild(itemEl);
+		const item = new TreeItem(itemEl, parent, parent.depth + 1, 1);
+		parent.children.push(item);
+		if (item.path) this.pathToItem.set(item.path, item);
+		parent._checkAnyChildrenOpen();
+		LinkHandler.initializeLinks(itemEl);
+		return item;
+	}
 }

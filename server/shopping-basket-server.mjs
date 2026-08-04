@@ -5,6 +5,7 @@ import { mkdir, readFile, readdir, stat } from "node:fs/promises";
 import { DatabaseSync } from "node:sqlite";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { MarkdownDocumentRenderer } from "./markdown-renderer.mjs";
 
 const HOST = process.env.HOST ?? "127.0.0.1";
 const PORT = Number(process.env.PORT ?? 8000);
@@ -22,7 +23,10 @@ const SEARCH_DATA_ROOT = path.join(EXPORT_ROOT, ".server-data");
 const CORPUS_DATABASE_PATH = path.join(SEARCH_DATA_ROOT, "corpus.sqlite");
 const SEARCH_VALUE_SEPARATOR = "\u001f";
 const INDEX_COMMIT_INTERVAL = Math.max(1, Number(process.env.INDEX_COMMIT_INTERVAL ?? 500));
+const PAGE_CACHE_ENTRIES = Math.max(1, Number(process.env.PAGE_CACHE_ENTRIES ?? 256));
 let corpusDatabasePromise;
+let navigationSnapshotPromise;
+const markdownRenderer = new MarkdownDocumentRenderer({ maxEntries: PAGE_CACHE_ENTRIES });
 const corpusStatus = {
 	state: "idle",
 	processed: 0,
@@ -270,24 +274,146 @@ function buildTagTree(rows, showInlineTags, showFrontmatterTags) {
 
 async function handleMetadataBootstrap(_request, response) {
 	try {
-		const metadata = JSON.parse(await readFile(path.join(EXPORT_ROOT, "site-lib", "metadata.json"), "utf8"));
-		const database = await getCorpusDatabase();
-		const rows = database.prepare(
-			"SELECT inline_tags, frontmatter_tags FROM metadata_documents WHERE kind = 'webpage'"
-		).all();
-		metadata.tagTree = buildTagTree(
-			rows,
-			metadata.featureOptions?.tags?.showInlineTags !== false,
-			metadata.featureOptions?.tags?.showFrontmatterTags !== false,
-		);
-		metadata.webpages = {};
-		metadata.fileInfo = {};
-		metadata.sourceToTarget = {};
-		metadata.metadataValueToTarget = {};
-		sendJSON(response, 200, metadata);
+		sendJSON(response, 200, await getAppBootstrap());
 	} catch (error) {
 		console.error("Metadata bootstrap failed:", error);
 		sendJSON(response, 500, { error: error.message ?? "Metadata bootstrap failed." });
+	}
+}
+
+async function getAppBootstrap() {
+	const metadata = JSON.parse(await readFile(path.join(EXPORT_ROOT, "site-lib", "metadata.json"), "utf8"));
+	const database = await getCorpusDatabase();
+	const rows = database.prepare(
+		"SELECT inline_tags, frontmatter_tags FROM metadata_documents WHERE kind = 'webpage'"
+	).all();
+	metadata.tagTree = buildTagTree(
+		rows,
+		metadata.featureOptions?.tags?.showInlineTags !== false,
+		metadata.featureOptions?.tags?.showFrontmatterTags !== false,
+	);
+	metadata.webpages = {};
+	metadata.fileInfo = {};
+	metadata.sourceToTarget = {};
+	metadata.metadataValueToTarget = {};
+	metadata.navigationMode = "lazy";
+	return metadata;
+}
+
+function normalizeNavigationParent(value) {
+	if (!value) return "";
+	if (typeof value !== "string" || value.includes("\0") || path.isAbsolute(value)) {
+		throw new Error("Invalid navigation path.");
+	}
+	const normalized = path.posix.normalize(value.replaceAll("\\", "/")).replace(/^\/+|\/+$/g, "");
+	if (normalized === ".") return "";
+	if (normalized === ".." || normalized.startsWith("../")) throw new Error("Invalid navigation path.");
+	return normalized;
+}
+
+async function getNavigationSnapshot() {
+	navigationSnapshotPromise ??= (async () => {
+		const database = await getCorpusDatabase();
+		const childrenByParent = new Map();
+		const rows = database.prepare(`
+			SELECT source_path, export_path, kind, title, show_in_tree, tree_order, type
+			FROM metadata_documents WHERE show_in_tree = 1
+		`).all();
+		const addChild = (parent, item) => {
+			const children = childrenByParent.get(parent) ?? new Map();
+			const existing = children.get(item.path);
+			if (!existing || item.kind === "document") children.set(item.path, item);
+			childrenByParent.set(parent, children);
+		};
+		for (const row of rows) {
+			const parts = String(row.source_path).replaceAll("\\", "/").split("/").filter(Boolean);
+			if (parts.length === 0) continue;
+			let parent = "";
+			for (let index = 0; index < parts.length - 1; index++) {
+				const folderPath = parent ? `${parent}/${parts[index]}` : parts[index];
+				addChild(parent, { kind: "folder", name: parts[index], path: folderPath, hasChildren: true });
+				parent = folderPath;
+			}
+			addChild(parent, {
+				kind: "document",
+				name: row.title || parts.at(-1),
+				path: row.source_path,
+				exportPath: row.export_path,
+				type: row.type,
+				treeOrder: Number(row.tree_order ?? 0),
+				hasChildren: false,
+			});
+		}
+		return childrenByParent;
+	})();
+	return navigationSnapshotPromise;
+}
+
+async function handleNavigation(request, response) {
+	try {
+		const requestURL = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
+		const parent = normalizeNavigationParent(requestURL.searchParams.get("parent") ?? "");
+		const snapshot = await getNavigationSnapshot();
+		const items = Array.from(snapshot.get(parent)?.values() ?? []).sort((a, b) => {
+			if (a.kind !== b.kind) return a.kind === "folder" ? -1 : 1;
+			return (a.treeOrder ?? Number.MAX_SAFE_INTEGER) - (b.treeOrder ?? Number.MAX_SAFE_INTEGER) ||
+				a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" });
+		});
+		sendJSON(response, 200, { parent, items });
+	} catch (error) {
+		sendJSON(response, 400, { error: error.message ?? "Navigation request failed." });
+	}
+}
+
+function resolveCorpusLink(database, sourcePath, target) {
+	const normalizedTarget = String(target).replaceAll("\\", "/").replace(/^\/+/, "");
+	if (!normalizedTarget || normalizedTarget.includes("\0")) return undefined;
+	const baseDirectory = path.posix.dirname(sourcePath);
+	const candidates = new Set([normalizedTarget]);
+	if (!path.posix.extname(normalizedTarget)) candidates.add(`${normalizedTarget}.md`);
+	if (!normalizedTarget.startsWith("../")) {
+		const relative = path.posix.normalize(path.posix.join(baseDirectory === "." ? "" : baseDirectory, normalizedTarget));
+		if (relative !== ".." && !relative.startsWith("../")) {
+			candidates.add(relative);
+			if (!path.posix.extname(relative)) candidates.add(`${relative}.md`);
+		}
+	}
+	const statement = database.prepare("SELECT export_path, source_path FROM metadata_documents WHERE source_path = ? LIMIT 1");
+	for (const candidate of candidates) {
+		const row = statement.get(candidate);
+		if (row) return { exportPath: row.export_path, sourcePath: row.source_path };
+	}
+	return undefined;
+}
+
+async function handlePage(request, response) {
+	try {
+		if (!VAULT_ROOT) throw Object.assign(new Error("VAULT_ROOT is required."), { statusCode: 500 });
+		const requestURL = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
+		const exportPath = requestURL.searchParams.get("path")?.replace(/^\/+/, "");
+		if (!exportPath) throw Object.assign(new Error("A document path is required."), { statusCode: 400 });
+		const database = await getCorpusDatabase();
+		const row = database.prepare("SELECT kind, data FROM metadata_documents WHERE export_path = ?").get(exportPath);
+		if (!row) throw Object.assign(new Error("Document not found."), { statusCode: 404 });
+		const data = JSON.parse(row.data);
+		if (row.kind !== "webpage" || data.type !== "markdown") {
+			throw Object.assign(new Error("Only Markdown documents can be rendered dynamically."), { statusCode: 415 });
+		}
+		const sourcePath = normalizeVaultPath(data.sourcePath);
+		const sourceStat = await stat(sourcePath.absolutePath);
+		if (!sourceStat.isFile()) throw Object.assign(new Error("Source document not found."), { statusCode: 404 });
+		const html = await markdownRenderer.render({
+			sourcePath: sourcePath.sourcePath,
+			modifiedTime: sourceStat.mtimeMs,
+			sourceSize: sourceStat.size,
+			loadMarkdown: () => readFile(sourcePath.absolutePath, "utf8"),
+			resolveLink: (target) => resolveCorpusLink(database, sourcePath.sourcePath, target),
+		});
+		sendJSON(response, 200, { data, html });
+	} catch (error) {
+		const statusCode = error.statusCode ?? 500;
+		if (statusCode >= 500) console.error("Page rendering failed:", error);
+		sendJSON(response, statusCode, { error: error.message ?? "Page rendering failed." });
 	}
 }
 
@@ -1029,6 +1155,30 @@ async function serveStatic(request, response) {
 
 	if (pathname.endsWith("/")) pathname += "index.html";
 	if (pathname === "/") pathname = "/index.html";
+	const requestedExportPath = pathname.replace(/^\/+/, "");
+	try {
+		const database = await getCorpusDatabase();
+		const document = database.prepare(
+			"SELECT kind, type FROM metadata_documents WHERE export_path = ?"
+		).get(requestedExportPath);
+		if (document?.kind === "webpage" && document.type === "markdown" && requestedExportPath !== "index.html") {
+			const shellPath = path.join(EXPORT_ROOT, "index.html");
+			const shellStat = await stat(shellPath);
+			response.writeHead(200, {
+				"Content-Type": "text/html; charset=utf-8",
+				"Content-Length": shellStat.size,
+				"Cache-Control": "no-cache",
+			});
+			if (request.method === "HEAD") {
+				response.end();
+				return;
+			}
+			createReadStream(shellPath).on("error", () => response.destroy()).pipe(response);
+			return;
+		}
+	} catch (error) {
+		console.error("SPA shell lookup failed:", error);
+	}
 
 	const absolutePath = path.resolve(EXPORT_ROOT, `.${pathname}`);
 	if (!isPathInside(EXPORT_ROOT, absolutePath)) {
@@ -1085,7 +1235,9 @@ async function resolveMetadataRedirect(pathname) {
 export const internals = {
 	buildSourceIndexes,
 	normalizeVaultPath,
+	normalizeNavigationParent,
 	resolveLinkedSource,
+	resolveCorpusLink,
 	rewriteMarkdownLinks,
 	rewriteInlineMarkdownLinks,
 	resolveMarkdownDestination,
@@ -1110,8 +1262,20 @@ export function createShoppingBasketServer() {
 			await handleMetadataBootstrap(request, response);
 			return;
 		}
+		if (request.method === "GET" && requestURL.pathname === "/api/app/bootstrap") {
+			await handleMetadataBootstrap(request, response);
+			return;
+		}
 		if (request.method === "GET" && requestURL.pathname === "/api/metadata/document") {
 			await handleMetadataDocument(request, response);
+			return;
+		}
+		if (request.method === "GET" && requestURL.pathname === "/api/navigation") {
+			await handleNavigation(request, response);
+			return;
+		}
+		if (request.method === "GET" && requestURL.pathname === "/api/page") {
+			await handlePage(request, response);
 			return;
 		}
 		if (request.method === "POST" && requestURL.pathname === "/api/search") {
