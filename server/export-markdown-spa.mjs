@@ -164,19 +164,26 @@ function createDirectDatabase(databasePath) {
 	return database;
 }
 
-function readExistingRecords(database) {
-	const records = new Map();
-	for (const row of database.prepare("SELECT filename, payload FROM source_records").all()) {
-		try {
-			records.set(row.filename, { serialized: row.payload, record: JSON.parse(row.payload) });
-		} catch {
-			// A damaged record is replaced by the next export.
-		}
-	}
-	return records;
+function createRecordStore(database) {
+	const knownRecords = new Map(database.prepare(
+		"SELECT filename, export_path FROM source_records"
+	).all().map((row) => [row.filename, row.export_path]));
+	const readRecord = database.prepare("SELECT payload FROM source_records WHERE filename = ?");
+	return {
+		knownRecords,
+		get(filename) {
+			const row = readRecord.get(filename);
+			if (!row) return undefined;
+			try {
+				return { serialized: row.payload, record: JSON.parse(row.payload) };
+			} catch {
+				return undefined;
+			}
+		},
+	};
 }
 
-function createDirectIndexWriter(database, existingRecords) {
+function createDirectIndexWriter(database, recordStore) {
 	const deleteMetadata = database.prepare("DELETE FROM metadata_documents WHERE export_path = ?");
 	const deleteRedirects = database.prepare("DELETE FROM metadata_redirects WHERE export_path = ?");
 	const deleteSearch = database.prepare("DELETE FROM search_documents WHERE path = ?");
@@ -211,11 +218,12 @@ function createDirectIndexWriter(database, existingRecords) {
 	function writeRecord(filename, record) {
 		generated.add(filename);
 		const serialized = JSON.stringify(record);
-		if (existingRecords.get(filename)?.serialized === serialized) {
+		const existing = recordStore.get(filename);
+		if (existing?.serialized === serialized) {
 			reusedRecords++;
 			return;
 		}
-		const previous = existingRecords.get(filename)?.record?.data;
+		const previous = existing?.record?.data;
 		const data = record.data;
 		if (previous?.exportPath) removeExportPath(previous.exportPath);
 		removeExportPath(data.exportPath);
@@ -245,9 +253,9 @@ function createDirectIndexWriter(database, existingRecords) {
 	}
 
 	function finish() {
-		for (const [filename, existing] of existingRecords) {
+		for (const [filename, exportPath] of recordStore.knownRecords) {
 			if (generated.has(filename)) continue;
-			if (existing.record?.data?.exportPath) removeExportPath(existing.record.data.exportPath);
+			removeExportPath(exportPath);
 			deleteSourceRecord.run(filename);
 			removedRecords++;
 		}
@@ -279,6 +287,18 @@ function resolveWikiTarget(rawTarget, sourcePath, documents, basenames) {
 	for (const candidate of candidates) if (documents.has(candidate)) return documents.get(candidate);
 	if (!target.includes("/")) return basenames.get(path.posix.basename(target).replace(/\.md$/i, ""));
 	return undefined;
+}
+
+function collectDocumentLinks(markdown, document, documents, basenames) {
+	const links = new Set();
+	const attachments = new Set();
+	for (const match of markdown.matchAll(WIKILINK_PATTERN)) {
+		const target = resolveWikiTarget(match[2], document.sourcePath, documents, basenames);
+		if (!target) continue;
+		links.add(target.exportPath);
+		if (match[1]) attachments.add(target.exportPath);
+	}
+	return { links, attachments };
 }
 
 function recordKey(exportPath) {
@@ -340,7 +360,7 @@ export async function exportMarkdownSpa({ vaultRoot, exportRoot, configPath } = 
 	const databaseRoot = path.join(exportRoot, ".server-data");
 	await mkdir(databaseRoot, { recursive: true });
 	const database = createDirectDatabase(path.join(databaseRoot, "corpus.sqlite"));
-	const existingRecords = readExistingRecords(database);
+	const recordStore = createRecordStore(database);
 
 	const allSourcePaths = await walkFiles(vaultRoot);
 	const sourcePaths = allSourcePaths.filter((sourcePath) => sourcePath.toLowerCase().endsWith(".md"))
@@ -351,75 +371,63 @@ export async function exportMarkdownSpa({ vaultRoot, exportRoot, configPath } = 
 		const absolutePath = path.join(vaultRoot, sourcePath);
 		const sourceStat = await stat(absolutePath);
 		const document = { sourcePath, absolutePath, sourceStat, exportPath: exportPath(sourcePath) };
-		if (sourcePath.toLowerCase().endsWith(".md")) {
-			const existing = existingRecords.get(recordKey(document.exportPath));
-			if (isCurrentSourceRecord(existing?.record, sourcePath, sourceStat)) document.cachedRecord = existing.record;
-			else document.markdown = await readFile(absolutePath, "utf8");
-		}
 		documents.set(sourcePath, document);
 		const basename = path.posix.basename(sourcePath, path.posix.extname(sourcePath));
 		if (!basenames.has(basename)) basenames.set(basename, document);
 	}
 
 	const documentsByExportPath = new Map(Array.from(documents.values()).map((document) => [document.exportPath, document]));
-	const backlinks = new Map(sourcePaths.map((sourcePath) => [sourcePath, new Set()]));
+	const backlinks = new Map();
 	const attachmentRecords = new Map();
-	const pageRecords = [];
-	for (let index = 0; index < sourcePaths.length; index++) {
-		const document = documents.get(sourcePaths[index]);
-		if (document.cachedRecord) {
-			const data = document.cachedRecord.data;
-			pageRecords.push({
-				document,
-				cachedRecord: document.cachedRecord,
-				links: new Set(data.links ?? []),
-				attachments: new Set(data.attachments ?? []),
-				treeOrder: index + 1,
-			});
-			continue;
-		}
-		const frontmatter = parseFrontmatter(document.markdown);
-		const headers = getHeaders(document.markdown);
-		const inlineTags = Array.from(document.markdown.matchAll(TAG_PATTERN), (match) => `#${match[2]}`);
-		const frontmatterTags = stringArray(frontmatter.values.tags).map((tag) => tag.startsWith("#") ? tag : `#${tag}`);
-		const tags = Array.from(new Set([...frontmatterTags, ...inlineTags]));
-		const links = new Set();
-		const attachments = new Set();
-		for (const match of document.markdown.matchAll(WIKILINK_PATTERN)) {
-			const target = resolveWikiTarget(match[2], document.sourcePath, documents, basenames);
-			if (!target) continue;
-			links.add(target.exportPath);
-			if (match[1]) attachments.add(target.exportPath);
-		}
-		const aliases = stringArray(frontmatter.values.aliases);
-		const title = String(frontmatter.values.title ?? headers[0]?.heading ?? path.posix.basename(document.sourcePath, ".md"));
-		const content = getSearchText(document.markdown, tags);
-		pageRecords.push({ document, frontmatter, headers, inlineTags, frontmatterTags, aliases, title, links, attachments, content, treeOrder: index + 1 });
-		if ((index + 1) % 250 === 0 || index + 1 === sourcePaths.length) {
-			console.log(`[node-export] indexed ${index + 1}/${sourcePaths.length} Markdown files`);
-		}
-	}
-
-	for (const entry of pageRecords) {
-		for (const linkedExportPath of entry.links) {
+	function registerLinks(sourceDocument, linkedExportPaths) {
+		for (const linkedExportPath of linkedExportPaths) {
 			const target = documentsByExportPath.get(linkedExportPath);
 			if (!target) continue;
-			if (target.sourcePath.toLowerCase().endsWith(".md")) backlinks.get(target.sourcePath).add(entry.document.exportPath);
+			if (target.sourcePath.toLowerCase().endsWith(".md")) {
+				const targetBacklinks = backlinks.get(target.sourcePath) ?? new Set();
+				targetBacklinks.add(sourceDocument.exportPath);
+				backlinks.set(target.sourcePath, targetBacklinks);
+			}
 			else attachmentRecords.set(target.sourcePath, target);
 		}
 	}
 
-	const indexWriter = createDirectIndexWriter(database, existingRecords);
-
-	for (const entry of pageRecords) {
-		const { document, links, attachments, treeOrder } = entry;
-		let record;
-		if (entry.cachedRecord) {
-			record = { ...entry.cachedRecord, data: { ...entry.cachedRecord.data } };
-			record.data.treeOrder = treeOrder;
-			record.data.backlinks = Array.from(backlinks.get(document.sourcePath));
+	for (let index = 0; index < sourcePaths.length; index++) {
+		const document = documents.get(sourcePaths[index]);
+		const existing = recordStore.get(recordKey(document.exportPath));
+		if (isCurrentSourceRecord(existing?.record, document.sourcePath, document.sourceStat)) {
+			registerLinks(document, existing.record.data.links ?? []);
 		} else {
-			const { frontmatter, headers, inlineTags, frontmatterTags, aliases, title, content } = entry;
+			const markdown = await readFile(document.absolutePath, "utf8");
+			registerLinks(document, collectDocumentLinks(markdown, document, documents, basenames).links);
+		}
+		if ((index + 1) % 250 === 0 || index + 1 === sourcePaths.length) {
+			console.log(`[node-export] resolved links ${index + 1}/${sourcePaths.length} Markdown files`);
+		}
+	}
+
+	const indexWriter = createDirectIndexWriter(database, recordStore);
+
+	for (let index = 0; index < sourcePaths.length; index++) {
+		const document = documents.get(sourcePaths[index]);
+		const treeOrder = index + 1;
+		const existing = recordStore.get(recordKey(document.exportPath));
+		let record;
+		if (isCurrentSourceRecord(existing?.record, document.sourcePath, document.sourceStat)) {
+			record = { ...existing.record, data: { ...existing.record.data } };
+			record.data.treeOrder = treeOrder;
+			record.data.backlinks = Array.from(backlinks.get(document.sourcePath) ?? []);
+		} else {
+			const markdown = await readFile(document.absolutePath, "utf8");
+			const frontmatter = parseFrontmatter(markdown);
+			const headers = getHeaders(markdown);
+			const inlineTags = Array.from(markdown.matchAll(TAG_PATTERN), (match) => `#${match[2]}`);
+			const frontmatterTags = stringArray(frontmatter.values.tags).map((tag) => tag.startsWith("#") ? tag : `#${tag}`);
+			const tags = Array.from(new Set([...frontmatterTags, ...inlineTags]));
+			const { links, attachments } = collectDocumentLinks(markdown, document, documents, basenames);
+			const aliases = stringArray(frontmatter.values.aliases);
+			const title = String(frontmatter.values.title ?? headers[0]?.heading ?? path.posix.basename(document.sourcePath, ".md"));
+			const content = getSearchText(markdown, tags);
 			const data = {
 				createdTime: document.sourceStat.ctimeMs,
 				modifiedTime: document.sourceStat.mtimeMs,
@@ -428,7 +436,7 @@ export async function exportMarkdownSpa({ vaultRoot, exportRoot, configPath } = 
 				exportPath: document.exportPath,
 				showInTree: true,
 				treeOrder,
-				backlinks: Array.from(backlinks.get(document.sourcePath)),
+				backlinks: Array.from(backlinks.get(document.sourcePath) ?? []),
 				type: "markdown",
 				data: null,
 				title,
@@ -454,6 +462,9 @@ export async function exportMarkdownSpa({ vaultRoot, exportRoot, configPath } = 
 			};
 		}
 		indexWriter.writeRecord(recordKey(document.exportPath), record);
+		if ((index + 1) % 250 === 0 || index + 1 === sourcePaths.length) {
+			console.log(`[node-export] indexed ${index + 1}/${sourcePaths.length} Markdown files`);
+		}
 	}
 
 	for (const attachment of attachmentRecords.values()) {
@@ -484,8 +495,8 @@ export async function exportMarkdownSpa({ vaultRoot, exportRoot, configPath } = 
 		themeName: "", bodyClasses: "", hasFavicon: false, serverMetadata: true,
 		featureOptions: featureOptions(options),
 	}));
-	console.log(`[node-export] indexed ${result.writtenRecords}, reused ${result.reusedRecords}, and removed ${result.removedRecords} SQLite records (${pageRecords.length} documents, ${attachmentRecords.size} referenced attachments)`);
-	return { ...result, documents: pageRecords.length, attachments: attachmentRecords.size };
+	console.log(`[node-export] indexed ${result.writtenRecords}, reused ${result.reusedRecords}, and removed ${result.removedRecords} SQLite records (${sourcePaths.length} documents, ${attachmentRecords.size} referenced attachments)`);
+	return { ...result, documents: sourcePaths.length, attachments: attachmentRecords.size };
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
