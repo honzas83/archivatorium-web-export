@@ -14,17 +14,19 @@ test("server indexes the unified corpus and keeps it private", async () => {
 	await mkdir(vaultRoot, { recursive: true });
 	await writeFile(path.join(exportRoot, "index.html"), "<!doctype html><main id='shell'>Test SPA shell</main>");
 	await mkdir(path.join(vaultRoot, "Folder"), { recursive: true });
+	await mkdir(path.join(vaultRoot, "Attachments"), { recursive: true });
 	await writeFile(path.join(vaultRoot, "Folder", "Document.md"), `---
 tags: Topic/Child
 ---
 # Document title
 
-Version one with [[Target]] and #Topic/Child.
+Version one with [[Target]], ![[Attachments/Report.pdf]] and #Topic/Child.
 
 > [!info] Metadata
 > <span class="trusted">trusted HTML</span>
 `);
 	await writeFile(path.join(vaultRoot, "Target.md"), "# Target\n\nTarget content.");
+	await writeFile(path.join(vaultRoot, "Attachments", "Report.pdf"), "PDF fixture");
 	await writeFile(path.join(exportRoot, "site-lib", "metadata.json"), JSON.stringify({
 		serverMetadata: true,
 	}));
@@ -91,6 +93,21 @@ Version one with [[Target]] and #Topic/Child.
 		},
 		search: { metadata: "", headers: ["Target"], content: "Target content." },
 	}));
+	await writeFile(path.join(corpusRoot, "attachment.json"), JSON.stringify({
+		kind: "file",
+		data: {
+			createdTime: 0,
+			modifiedTime: 0,
+			sourceSize: 0,
+			sourcePath: "Attachments/Report.pdf",
+			exportPath: "attachments/report.pdf",
+			showInTree: false,
+			treeOrder: 0,
+			backlinks: [],
+			type: "attachment",
+			data: null,
+		},
+	}));
 
 	process.env.EXPORT_ROOT = exportRoot;
 	process.env.VAULT_ROOT = vaultRoot;
@@ -121,8 +138,8 @@ Version one with [[Target]] and #Topic/Child.
 		assert.equal(statusResponse.status, 200);
 		assert.deepEqual(await statusResponse.json(), {
 			state: "ready",
-			processed: 2,
-			total: 2,
+			processed: 3,
+			total: 3,
 		});
 
 		const bootstrapResponse = await fetch(`${baseURL}/api/app/bootstrap`);
@@ -141,7 +158,12 @@ Version one with [[Target]] and #Topic/Child.
 		assert.match(page.html, /Version one/);
 		assert.match(page.html, /class="trusted"/);
 		assert.match(page.html, /href="target.html"/);
+		assert.match(page.html, /src="\/attachments\/report.pdf"/);
 		assert.match(page.html, /data-callout="info"/);
+
+		const attachmentResponse = await fetch(`${baseURL}/attachments/report.pdf`);
+		assert.equal(attachmentResponse.status, 200);
+		assert.equal(await attachmentResponse.text(), "PDF fixture");
 
 		const shellResponse = await fetch(`${baseURL}/folder/document.html`);
 		assert.equal(shellResponse.status, 200);

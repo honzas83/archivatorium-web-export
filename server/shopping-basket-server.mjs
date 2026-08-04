@@ -490,7 +490,7 @@ function isPathInside(parent, candidate) {
 	return relative === "" || (!!relative && !relative.startsWith("..") && !path.isAbsolute(relative));
 }
 
-function normalizeVaultPath(sourcePath) {
+function normalizeVaultFilePath(sourcePath) {
 	if (typeof sourcePath !== "string" || sourcePath.length === 0) {
 		throw new Error("Each item must include a sourcePath.");
 	}
@@ -504,10 +504,6 @@ function normalizeVaultPath(sourcePath) {
 		throw new Error(`Invalid source path: ${sourcePath}`);
 	}
 
-	if (!normalized.toLowerCase().endsWith(".md")) {
-		throw new Error(`Only Markdown files can be checked out: ${sourcePath}`);
-	}
-
 	const absolutePath = path.resolve(VAULT_ROOT, normalized);
 	if (!isPathInside(VAULT_ROOT, absolutePath)) {
 		throw new Error(`Invalid source path: ${sourcePath}`);
@@ -517,6 +513,14 @@ function normalizeVaultPath(sourcePath) {
 		sourcePath: normalized,
 		absolutePath,
 	};
+}
+
+function normalizeVaultPath(sourcePath) {
+	const normalized = normalizeVaultFilePath(sourcePath);
+	if (!normalized.sourcePath.toLowerCase().endsWith(".md")) {
+		throw new Error(`Only Markdown files can be checked out: ${sourcePath}`);
+	}
+	return normalized;
 }
 
 async function readJSONBody(request) {
@@ -1159,7 +1163,7 @@ async function serveStatic(request, response) {
 	try {
 		const database = await getCorpusDatabase();
 		const document = database.prepare(
-			"SELECT kind, type FROM metadata_documents WHERE export_path = ?"
+			"SELECT kind, type, data FROM metadata_documents WHERE export_path = ?"
 		).get(requestedExportPath);
 		if (document?.kind === "webpage" && document.type === "markdown" && requestedExportPath !== "index.html") {
 			const shellPath = path.join(EXPORT_ROOT, "index.html");
@@ -1174,6 +1178,22 @@ async function serveStatic(request, response) {
 				return;
 			}
 			createReadStream(shellPath).on("error", () => response.destroy()).pipe(response);
+			return;
+		}
+		if (document?.kind === "file" && document.type === "attachment" && VAULT_ROOT) {
+			const data = JSON.parse(document.data);
+			const source = normalizeVaultFilePath(data.sourcePath);
+			const sourceStat = await stat(source.absolutePath);
+			if (!sourceStat.isFile()) throw new Error("Not an attachment");
+			response.writeHead(200, {
+				"Content-Type": contentTypes.get(path.extname(source.absolutePath).toLowerCase()) ?? "application/octet-stream",
+				"Content-Length": sourceStat.size,
+			});
+			if (request.method === "HEAD") {
+				response.end();
+				return;
+			}
+			createReadStream(source.absolutePath).on("error", () => response.destroy()).pipe(response);
 			return;
 		}
 	} catch (error) {
@@ -1235,6 +1255,7 @@ async function resolveMetadataRedirect(pathname) {
 export const internals = {
 	buildSourceIndexes,
 	normalizeVaultPath,
+	normalizeVaultFilePath,
 	normalizeNavigationParent,
 	resolveLinkedSource,
 	resolveCorpusLink,

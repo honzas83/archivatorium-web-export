@@ -26,6 +26,7 @@ export class Website
 	
 	private sourceFiles: TFile[] = [];
 	private webpageSourceFiles: TFile[] = [];
+	private directAttachmentSourcePaths: Set<string> = new Set();
 	private fileTreeOrderBySourcePath: Map<string, number> = new Map();
 
 	public fileTree: FileTree;
@@ -146,6 +147,7 @@ export class Website
 		ExportLog.resetProgress();
 		this.sourceFiles = files?.filter((file) => file) ?? [];
 		this.webpageSourceFiles = [];
+		this.directAttachmentSourcePaths.clear();
 		this.fileTreeOrderBySourcePath.clear();
 		// Indexing is intentionally excluded from export progress. It prepares
 		// the workload, while the measured work starts with the optional file
@@ -221,14 +223,6 @@ export class Website
 					if (file.extension.toLowerCase() === "md")
 					{
 						this.webpageSourceFiles.push(file);
-					}
-					else
-					{
-						const attachment = Attachment.fromSource(
-							this.getTargetPathForFile(file), file, this.exportOptions
-						);
-						await attachment.download();
-						await this.index.recordDirectAttachment(attachment);
 					}
 					continue;
 				}
@@ -471,8 +465,17 @@ export class Website
 				ExportLog.setProgress(0, "Building Markdown Corpus", sourceFile.path);
 				await this.writeCurrentRender(sourceFile.path);
 				const recordStart = performance.now();
-				const record = await createMarkdownCorpusRecord(sourceFile, this, webpage.treeOrder);
-				await this.index.recordMarkdownCorpus(record);
+				const corpus = await createMarkdownCorpusRecord(sourceFile, this, webpage.treeOrder);
+				await this.index.recordMarkdownCorpus(corpus.record);
+				for (const attachmentFile of corpus.attachmentFiles)
+				{
+					if (this.directAttachmentSourcePaths.has(attachmentFile.path)) continue;
+					this.directAttachmentSourcePaths.add(attachmentFile.path);
+					const attachment = Attachment.fromSource(
+						this.getTargetPathForFile(attachmentFile), attachmentFile, this.exportOptions
+					);
+					await this.index.recordDirectAttachment(attachment);
+				}
 				await this.clearCurrentRender();
 				this.recordExportTiming({
 					renderMs: performance.now() - recordStart,

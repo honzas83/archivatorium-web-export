@@ -4,6 +4,12 @@ import type { WebpageData } from "src/shared/website-data";
 import type { ServerCorpusRecord } from "./server-corpus";
 import type { Website } from "./website";
 
+export interface MarkdownCorpusBuild
+{
+	record: ServerCorpusRecord;
+	attachmentFiles: TFile[];
+}
+
 const WIKILINK_PATTERN = /(!?)\[\[([^\]|#]+)(?:#[^\]|]+)?(?:\|([^\]]+))?\]\]/g;
 const FRONTMATTER_PATTERN = /^---\r?\n[\s\S]*?\r?\n---\r?\n?/;
 
@@ -112,7 +118,7 @@ function getHeaders(markdown: string): { heading: string, level: number, id: str
 	return headers;
 }
 
-export async function createMarkdownCorpusRecord(file: TFile, website: Website, treeOrder: number): Promise<ServerCorpusRecord> {
+export async function createMarkdownCorpusRecord(file: TFile, website: Website, treeOrder: number): Promise<MarkdownCorpusBuild> {
 	const markdown = await app.vault.cachedRead(file);
 	const cache = app.metadataCache.getFileCache(file);
 	const frontmatter = cache?.frontmatter ?? {};
@@ -128,10 +134,12 @@ export async function createMarkdownCorpusRecord(file: TFile, website: Website, 
 	collectRedirectValues(frontmatter.citekey, redirects);
 	const links = new Set<string>();
 	const attachments = new Set<string>();
+	const attachmentFiles = new Map<string, TFile>();
 	for (const match of markdown.matchAll(WIKILINK_PATTERN)) {
 		const destination = app.metadataCache.getFirstLinkpathDest(match[2].trim(), file.path);
 		if (!(destination instanceof TFile)) continue;
 		const targetPath = getTargetPath(website, destination);
+		if (destination.extension.toLowerCase() !== "md") attachmentFiles.set(destination.path, destination);
 		if (match[1]) attachments.add(targetPath);
 		else links.add(targetPath);
 	}
@@ -171,13 +179,16 @@ export async function createMarkdownCorpusRecord(file: TFile, website: Website, 
 		fullURL: "",
 	};
 	return {
-		kind: "webpage",
-		data,
-		redirectValues: Array.from(new Set(redirects)),
-		search: {
-			metadata: metadataValues.join(" "),
-			headers: headers.map((header) => header.heading),
-			content,
+		record: {
+			kind: "webpage",
+			data,
+			redirectValues: Array.from(new Set(redirects)),
+			search: {
+				metadata: metadataValues.join(" "),
+				headers: headers.map((header) => header.heading),
+				content,
+			},
 		},
+		attachmentFiles: Array.from(attachmentFiles.values()),
 	};
 }
