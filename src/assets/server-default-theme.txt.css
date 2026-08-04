@@ -153,7 +153,13 @@ a:hover { color: var(--text-accent-hover); text-decoration: underline; }
 .callout[data-callout="warning"], .callout[data-callout="caution"], .callout[data-callout="attention"] { --callout-color: 236, 117, 0; }
 .callout[data-callout="failure"], .callout[data-callout="fail"], .callout[data-callout="missing"], .callout[data-callout="danger"], .callout[data-callout="error"], .callout[data-callout="bug"] { --callout-color: 233, 49, 71; }
 .callout[data-callout="question"], .callout[data-callout="help"], .callout[data-callout="faq"] { --callout-color: 8, 109, 221; }
-.callout[data-callout="quote"], .callout[data-callout="cite"], .callout[data-callout="citingthisdocument"] { --callout-color: 158, 158, 158; }
+.callout[data-callout="quote"], .callout[data-callout="cite"] { --callout-color: 158, 158, 158; }
+.callout[data-callout="citingthisdocument"] {
+  --callout-color: 8, 109, 221;
+  border: 0;
+  border-radius: var(--radius-m);
+  background: rgba(var(--callout-color), .1);
+}
 .callout-title {
   display: flex;
   align-items: center;
@@ -172,6 +178,37 @@ a:hover { color: var(--text-accent-hover); text-decoration: underline; }
 .callout-content > :first-child { margin-top: 0; }
 .callout-content > :last-child { margin-bottom: 0; }
 .callout.is-collapsed .callout-content { display: none; }
+.callout[data-callout="citingthisdocument"] .callout-title {
+  padding: 1em 1.5em .6em;
+  font-size: 1.3em;
+  font-weight: 700;
+}
+.callout[data-callout="citingthisdocument"] .callout-icon .svg-icon { width: 1.25em; height: 1.25em; }
+.callout[data-callout="citingthisdocument"] .callout-content { padding: .2em 1.5em 1.5em; }
+.callout[data-callout="citingthisdocument"] .callout-content > p { margin: 1.15em 0 .55em; font-family: var(--font-interface); font-size: 1.15em; font-weight: 700; }
+.callout[data-callout="citingthisdocument"] .callout-content > pre {
+  position: relative;
+  margin: 0 0 1.4em;
+  padding: 1em 1.15em;
+  border-radius: var(--radius-s);
+  background: var(--background-primary);
+  color: var(--text-normal);
+  font-size: .98em;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+.markdown-rendered pre > button.copy-code-button {
+  position: absolute;
+  top: .6em;
+  right: .6em;
+  display: inline-flex;
+  min-height: 0;
+  padding: .25em;
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+}
+.markdown-rendered pre > button.copy-code-button:hover { background: var(--background-modifier-hover); color: var(--text-normal); }
 
 .sidebar { font-family: var(--font-interface); color: var(--text-normal); background: var(--background-secondary); }
 .sidebar .leaf-content { background: var(--background-secondary); }

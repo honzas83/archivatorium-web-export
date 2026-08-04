@@ -61,6 +61,7 @@ title: Hidden frontmatter
 	assert.match(first, /<table>/);
 	assert.match(first, /data-callout="info"/);
 	assert.match(first, /data-callout="citingthisdocument"/);
+	assert.match(first, /callout-title-inner">Citing this document<\/div>/);
 	assert.match(first, /data-callout="warning" data-callout-fold="-"/);
 	assert.match(first, /class="callout-icon"/);
 	assert.match(first, /class="trusted"/);
