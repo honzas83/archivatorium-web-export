@@ -64,8 +64,8 @@ of documents practical.
 - Obsidian desktop when using the plugin workflow
 - A writable vault during generation and indexing
 
-Node 25 is not supported by the current dependency and build toolchain. The
-tested package range is `>=24 <25 || >=26 <27`.
+The supported package range is `>=24 <27`. Node 24 and Node 26 have been
+verified directly with the complete build and server test suite.
 
 ## Installation
 

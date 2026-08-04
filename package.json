@@ -4,7 +4,7 @@
 	"description": "Web publishing and collection checkout for Archivatorium research vaults.",
 	"main": "main.js",
 	"engines": {
-		"node": ">=24 <25 || >=26 <27"
+		"node": ">=24 <27"
 	},
 	"scripts": {
 		"dev": "node esbuild.config.mjs",
