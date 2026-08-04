@@ -159,6 +159,24 @@ Version one with complete searchable text, [[Target]], [Loose](Loose.md), ![[Att
 		const privateCorpusResponse = await fetch(`${baseURL}/corpus.sqlite`);
 		assert.equal(privateCorpusResponse.status, 404);
 		assert.equal((await fetch(`${baseURL}/.export-files.log`)).status, 404);
+
+		await rm(path.join(serverRoot, "index.html"));
+		const { createArchivatoriumServer: createRecoveryServer } = await import(
+			`./server.mjs?app-recovery=${Date.now()}`
+		);
+		const recoveryServer = createRecoveryServer();
+		try {
+			recoveryServer.listen(0, "127.0.0.1");
+			await once(recoveryServer, "listening");
+			const recoveryAddress = recoveryServer.address();
+			assert(recoveryAddress && typeof recoveryAddress === "object");
+			const recoveryResponse = await fetch(`http://127.0.0.1:${recoveryAddress.port}/`);
+			assert.equal(recoveryResponse.status, 200);
+			assert.equal((await stat(path.join(serverRoot, "index.html"))).isFile(), true);
+		} finally {
+			recoveryServer.close();
+			await once(recoveryServer, "close");
+		}
 	} finally {
 		server.close();
 		await once(server, "close");

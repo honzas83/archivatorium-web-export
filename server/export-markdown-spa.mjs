@@ -383,18 +383,42 @@ async function writeAssets(exportRoot) {
 	]);
 }
 
-export async function exportMarkdownSpa({ vaultRoot, configPath, writeApplication = true } = {}) {
-	vaultRoot = resolveVaultRoot(vaultRoot);
-	const exportRoot = resolveServerRoot(vaultRoot);
+async function loadExportOptions(vaultRoot, configPath) {
 	const settingsPath = configPath ?? path.join(vaultRoot, ".obsidian/plugins/archivatorium-web-export/data.json");
-	let config = {};
 	try {
-		config = JSON.parse(await readFile(settingsPath, "utf8"));
+		return JSON.parse(await readFile(settingsPath, "utf8")).exportOptions ?? {};
 	} catch (error) {
 		if (error?.code !== "ENOENT" || configPath) throw error;
 		console.log("[node-export] Plugin data.json not found; using default export settings.");
+		return {};
 	}
-	const options = config.exportOptions ?? {};
+}
+
+async function writeGeneratedApplication(vaultRoot, exportRoot, options) {
+	const siteName = options.siteName || path.basename(vaultRoot);
+	await writeAssets(exportRoot);
+	await writeFile(path.join(exportRoot, "index.html"), createShell(siteName));
+	await writeFile(path.join(exportRoot, "site-lib", "metadata.json"), JSON.stringify({
+		createdTime: Date.now(), modifiedTime: Date.now(), siteName, vaultName: path.basename(vaultRoot),
+		exportRoot: "", baseURL: "", pluginVersion: "server-markdown-spa",
+		themeName: "", bodyClasses: "publish css-settings-manager show-inline-title show-ribbon is-focused", hasFavicon: true, serverMetadata: true,
+		featureOptions: featureOptions(options),
+	}));
+}
+
+export async function writeMarkdownSpaApplication({ vaultRoot, configPath } = {}) {
+	vaultRoot = resolveVaultRoot(vaultRoot);
+	const exportRoot = resolveServerRoot(vaultRoot);
+	const options = await loadExportOptions(vaultRoot, configPath);
+	await mkdir(exportRoot, { recursive: true });
+	await writeGeneratedApplication(vaultRoot, exportRoot, options);
+	return { serverRoot: exportRoot };
+}
+
+export async function exportMarkdownSpa({ vaultRoot, configPath, writeApplication = true } = {}) {
+	vaultRoot = resolveVaultRoot(vaultRoot);
+	const exportRoot = resolveServerRoot(vaultRoot);
+	const options = await loadExportOptions(vaultRoot, configPath);
 	await mkdir(exportRoot, { recursive: true });
 	const database = createDirectDatabase(resolveCorpusDatabasePath(vaultRoot));
 	const recordStore = createRecordStore(database);
@@ -526,15 +550,7 @@ export async function exportMarkdownSpa({ vaultRoot, configPath, writeApplicatio
 	await rm(path.join(exportRoot, "site-lib", "corpus"), { recursive: true, force: true });
 
 	if (writeApplication) {
-		const siteName = options.siteName || path.basename(vaultRoot);
-		await writeAssets(exportRoot);
-		await writeFile(path.join(exportRoot, "index.html"), createShell(siteName));
-		await writeFile(path.join(exportRoot, "site-lib", "metadata.json"), JSON.stringify({
-			createdTime: Date.now(), modifiedTime: Date.now(), siteName, vaultName: path.basename(vaultRoot),
-			exportRoot: "", baseURL: "", pluginVersion: "server-markdown-spa",
-			themeName: "", bodyClasses: "publish css-settings-manager show-inline-title show-ribbon is-focused", hasFavicon: true, serverMetadata: true,
-			featureOptions: featureOptions(options),
-		}));
+		await writeGeneratedApplication(vaultRoot, exportRoot, options);
 	}
 	console.log(`[node-export] indexed ${result.writtenRecords}, reused ${result.reusedRecords}, and removed ${result.removedRecords} SQLite records (${sourcePaths.length} documents, ${attachmentRecords.size} referenced attachments)`);
 	return { ...result, documents: sourcePaths.length, attachments: attachmentRecords.size, serverRoot: exportRoot };

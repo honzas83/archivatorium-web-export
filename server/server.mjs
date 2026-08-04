@@ -5,7 +5,7 @@ import { readFile, readdir, stat } from "node:fs/promises";
 import { DatabaseSync } from "node:sqlite";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { exportMarkdownSpa } from "./export-markdown-spa.mjs";
+import { exportMarkdownSpa, writeMarkdownSpaApplication } from "./export-markdown-spa.mjs";
 import { MarkdownDocumentRenderer } from "./markdown-renderer.mjs";
 import { resolveCorpusDatabasePath, resolveServerRoot, resolveVaultRoot } from "./vault-layout.mjs";
 
@@ -30,6 +30,13 @@ const corpusStatus = {
 };
 const searchStatus = corpusStatus;
 const metadataStatus = corpusStatus;
+const APPLICATION_FILES = [
+	"index.html",
+	"favicon.png",
+	"site-lib/metadata.json",
+	"site-lib/styles/app.css",
+	"site-lib/scripts/webpage.js",
+];
 
 const contentTypes = new Map([
 	[".html", "text/html; charset=utf-8"],
@@ -109,6 +116,16 @@ function splitSearchValues(value) {
 	return value ? String(value).split(SEARCH_VALUE_SEPARATOR) : [];
 }
 
+async function hasGeneratedApplication() {
+	try {
+		const files = await Promise.all(APPLICATION_FILES.map((file) => stat(path.join(SERVER_ROOT, file))));
+		return files.every((file) => file.isFile());
+	} catch (error) {
+		if (error?.code === "ENOENT") return false;
+		throw error;
+	}
+}
+
 async function initializeCorpusDatabase() {
 	corpusStatus.state = "opening";
 	let databaseExists = false;
@@ -129,6 +146,7 @@ async function initializeCorpusDatabase() {
 			existingDatabase.close();
 		}
 	}
+	const applicationExists = await hasGeneratedApplication();
 	if (databaseMode !== "direct-markdown-spa") {
 		corpusStatus.state = "indexing";
 		console.log(databaseExists
@@ -136,6 +154,10 @@ async function initializeCorpusDatabase() {
 			: `[companion-sqlite] database missing; indexing vault into ${CORPUS_DATABASE_PATH}`
 		);
 		await exportMarkdownSpa({ vaultRoot: VAULT_ROOT, writeApplication: false });
+	}
+	if (!applicationExists) {
+		console.log(`[companion-app] generated application is incomplete; rebuilding ${SERVER_ROOT}`);
+		await writeMarkdownSpaApplication({ vaultRoot: VAULT_ROOT });
 	}
 	const database = new DatabaseSync(CORPUS_DATABASE_PATH);
 	try {
