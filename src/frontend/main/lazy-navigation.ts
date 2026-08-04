@@ -120,9 +120,8 @@ export class LazyNavigation {
 
 		const appendFolder = (parent: TreeItem, folder: SearchFolder) => {
 			for (const child of Array.from(folder.folders.values()).sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" }))) {
-				const item = this.tree.appendItem(parent, this.createItemElement({ kind: "folder", name: child.name, path: child.path, hasChildren: true }, parent.depth + 1));
+				const item = this.tree.appendItem(parent, this.createItemElement({ kind: "folder", name: child.name, path: child.path, hasChildren: true }, parent.depth + 1, false));
 				item.path = child.path;
-				item.collapsed = false;
 				appendFolder(item, child);
 			}
 			for (const document of folder.documents) {
@@ -168,11 +167,14 @@ export class LazyNavigation {
 		this.loadedParents.add(parentPath);
 	}
 
-	private createItemElement(entry: NavigationItem, depth: number): HTMLElement {
+	private createItemElement(entry: NavigationItem, depth: number, startCollapsed = true): HTMLElement {
 		const item = document.createElement("div");
 		item.classList.add("tree-item", entry.kind === "folder" ? "nav-folder" : "nav-file");
 		item.dataset.depth = String(depth);
-		if (entry.kind === "folder" && entry.hasChildren) item.classList.add("mod-collapsible", "is-collapsed");
+		if (entry.kind === "folder" && entry.hasChildren) {
+			item.classList.add("mod-collapsible");
+			if (startCollapsed) item.classList.add("is-collapsed");
+		}
 
 		const self = document.createElement(entry.kind === "document" ? "a" : "div");
 		self.classList.add("tree-item-self", "is-clickable", entry.kind === "folder" ? "nav-folder-title" : "nav-file-title");
@@ -183,7 +185,8 @@ export class LazyNavigation {
 			icon.type = "button";
 			icon.setAttribute("aria-label", `Toggle ${entry.name}`);
 			icon.setAttribute("title", `Toggle ${entry.name}`);
-			icon.classList.add("tree-item-icon", "collapse-icon", "nav-folder-collapse-indicator", "is-collapsed");
+			icon.classList.add("tree-item-icon", "collapse-icon", "nav-folder-collapse-indicator");
+			if (startCollapsed) icon.classList.add("is-collapsed");
 			icon.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="svg-icon right-triangle"><path d="M3 8L12 17L21 8"></path></svg>';
 			self.appendChild(icon);
 		}
