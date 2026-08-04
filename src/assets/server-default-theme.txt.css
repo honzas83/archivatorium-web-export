@@ -132,7 +132,7 @@ a:hover { color: var(--text-accent-hover); text-decoration: underline; }
 .obsidian-document p, .obsidian-document ul, .obsidian-document ol { margin: .75em 0; }
 .obsidian-document img { max-width: 100%; height: auto; }
 .obsidian-document pre, .obsidian-document code { font-family: var(--font-monospace); font-size: .9em; }
-.obsidian-document pre { overflow: auto; padding: 1em; border-radius: var(--radius-s); background: var(--code-background); }
+.obsidian-document pre { position: relative; overflow: auto; padding: 1em; border-radius: var(--radius-s); background: var(--code-background); }
 .obsidian-document :not(pre) > code { padding: .12em .3em; border-radius: var(--radius-s); background: var(--code-background); }
 .obsidian-document blockquote { margin: 1em 0; padding: .1em 1em; border-left: 3px solid var(--blockquote-border-color); color: var(--text-muted); }
 .obsidian-document hr { border: 0; border-top: var(--hr-thickness) solid var(--hr-color); margin: 2em 0; }
@@ -158,6 +158,23 @@ a:hover { color: var(--text-accent-hover); text-decoration: underline; }
   --callout-color: 0, 191, 188;
   border: 0;
   background: rgba(var(--callout-color), .1);
+}
+.callout[data-callout="citingthisdocument"] pre {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--font-monospace);
+  font-size: 1em;
+  line-height: var(--line-height-normal);
+}
+.callout[data-callout="citingthisdocument"] pre > code {
+  overflow-wrap: inherit;
+  white-space: inherit;
+  word-break: inherit;
+}
+.callout[data-callout="citingthisdocument"] pre > button.copy-code-button {
+  display: inline-flex;
+  opacity: 1;
 }
 .callout-title {
   display: flex;
