@@ -19,7 +19,9 @@ theme assets.
   export. The clear-search control is hidden for an empty query and appears as
   an accessible × button when the input contains text.
 - Direct document URLs, browser back/forward navigation, Markdown links, and
-  tag links keep the SPA loaded and update the current document.
+  tag links keep the SPA loaded and update the current document. The browser
+  URL follows Markdown documents, attachments, heading anchors, and search
+  queries; back/forward restores the corresponding state.
 - Markdown documents with top-level tables expand to the complete available
   center workspace; prose-only documents retain the readable line width.
 - A PDF link replaces the Markdown document in the center pane while both

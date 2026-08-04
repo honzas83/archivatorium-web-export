@@ -266,14 +266,13 @@ export class ObsidianWebsite {
 
 		// Set initial history state
 		if (this.isHttp) {
-			let initialPath = this.document.pathname;
-			if (initialPath == "index.html") initialPath = "";
-			document.title = this.document.title;
-			history.replaceState(
-				{ pathname: initialPath },
-				this.document.title,
-				initialPath
+			const initialURL = this.getBrowserURL(
+				this.document.pathname,
+				LinkHandler.getQueryFromURL(window.location.href),
+				LinkHandler.getHashFromURL(window.location.href),
 			);
+			document.title = this.document.title;
+			this.updateBrowserHistory(initialURL, this.document.title, true);
 		}
 
 		this.isLoaded = true;
@@ -284,9 +283,9 @@ export class ObsidianWebsite {
 	private initEvents() {
 		window.addEventListener("popstate", async (e) => {
 			console.log("popstate", e);
-			if (!e.state) return;
-			const pathname = e.state.pathname;
-			await ObsidianSite.loadURL(pathname, false);
+			const target = e.state?.url ?? e.state?.pathname ??
+				`${window.location.pathname}${window.location.search}${window.location.hash}`;
+			await ObsidianSite.loadURL(target, false);
 		});
 
 		const localThis = this;
@@ -310,6 +309,26 @@ export class ObsidianWebsite {
 		meta.setAttribute('content', content);
 	}
 
+	private getBrowserURL(pathname: string, query: string = "", header: string = ""): string {
+		const cleanPath = LinkHandler.getPathnameFromURL(pathname).replace(/^\/+/, "");
+		let browserURL = cleanPath === "index.html" || cleanPath === "" ? "/" : `/${cleanPath}`;
+		if (query) {
+			if (query.startsWith("query=")) {
+				const encodedQuery = encodeURIComponent(query.substring(6)).replace(/%3A/gi, ":");
+				browserURL += `?query=${encodedQuery}`;
+			}
+			else browserURL += `?${query}`;
+		}
+		if (header) browserURL += `#${encodeURIComponent(header)}`;
+		return browserURL;
+	}
+
+	private updateBrowserHistory(url: string, title: string, replace: boolean = false): void {
+		const state = { pathname: LinkHandler.getPathnameFromURL(url), url };
+		if (replace) history.replaceState(state, title, url);
+		else history.pushState(state, title, url);
+	}
+
 	public async loadURL(url: string, pushState: boolean = true): Promise<ObsidianDocument | undefined> {
 		const header = LinkHandler.getHashFromURL(url);
 		const query = LinkHandler.getQueryFromURL(url);
@@ -318,15 +337,22 @@ export class ObsidianWebsite {
 		console.log("Loading URL", url, header, query);
 
 		if (query && query.startsWith("query=")) {
-			this.search?.searchParseFilters(query.substring(6));
+			await this.search?.searchParseFilters(query.substring(6));
+			if (this.isHttp && pushState) {
+				this.updateBrowserHistory(this.getBrowserURL(url, query, header), document.title);
+			}
 			return;
 		}
 
 		// if this document is already loaded
 		if (this.document.pathname == url) {
 			if (header) this.document.scrollToHeader(header);
-			else {
+			else if (pushState) {
 				new Notice("This page is already loaded.");
+			}
+			if (!pushState) this.search?.clear();
+			if (this.isHttp && pushState && header) {
+				this.updateBrowserHistory(this.getBrowserURL(url, "", header), this.document.title);
 			}
 
 			return this.document;
@@ -356,7 +382,6 @@ export class ObsidianWebsite {
 		this.updateMetaTag("author", page.info?.author || "");
 		this.updateMetaTag("og:title", page.title);
 		this.updateMetaTag("og:description", page.info?.description || "");
-		this.updateMetaTag("og:url", window.location.href);
 		this.updateMetaTag("og:image", page.info?.coverImageURL || "");
 
 		// Update graph view and file tree
@@ -368,14 +393,12 @@ export class ObsidianWebsite {
 		this.document = page;
 
 		if (this.document && this.isHttp && pushState) {
-			let currentPath = this.document.pathname;
-			if (currentPath == "index.html") currentPath = "";
-			history.pushState(
-				{ pathname: currentPath },
+			this.updateBrowserHistory(
+				this.getBrowserURL(this.document.pathname, "", header),
 				this.document.title,
-				currentPath
 			);
 		}
+		this.updateMetaTag("og:url", window.location.href);
 
 		setTimeout(async () => {
 
