@@ -26,6 +26,19 @@ body {
   line-height: 24px;
 }
 
+#outline .outline-document-title {
+  font-weight: 700;
+}
+
+#outline .tree-item-self {
+  font-weight: 400;
+}
+
+#outline .tree-item[data-depth="1"]:not(.mod-collapsible) > .tree-item-self {
+  font-size: 1.05em;
+  font-weight: 700;
+}
+
 /* Wide Markdown tables should use the complete center workspace instead of
    being squeezed into the readable prose width. */
 body #center-content > .obsidian-document > .markdown-preview-sizer:has(> table) {

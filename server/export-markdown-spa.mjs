@@ -12,7 +12,7 @@ const MARKDOWN_LINK_PATTERN = /(!?)\[[^\]]*\]\(((?:[^()\s]|\([^)]*\))+)(?:\s+['\
 const TAG_PATTERN = /(^|[\s(])#([\p{L}\p{N}_/-]+)/gmu;
 const SEARCH_VALUE_SEPARATOR = "\u001f";
 const EXPORT_COMMIT_INTERVAL = Math.max(1, Number(process.env.EXPORT_COMMIT_INTERVAL ?? 500));
-const RECORD_FORMAT_VERSION = "2";
+const RECORD_FORMAT_VERSION = "3";
 
 function slugifyPath(value) {
 	return value.replaceAll(" ", "-").replaceAll(/-{2,}/g, "-").toLowerCase();
@@ -78,8 +78,9 @@ function withoutExcludedCallouts(markdown) {
 		const excluded = normalizeCallout(match[1]) === "citingthisdocument" ||
 			normalizeCallout(match[2]) === "citingthisdocument" ||
 			normalizeCallout(match[2]) === "metadata";
-		while (index < lines.length && (lines[index].startsWith(">") || lines[index].trim() === "")) {
-			if (!excluded) kept.push(lines[index]);
+		index++;
+		while (index < lines.length && lines[index].startsWith(">")) {
+			if (!excluded) kept.push(lines[index].replace(/^>\s?/, ""));
 			index++;
 		}
 	}
@@ -90,7 +91,7 @@ function getHeaders(markdown) {
 	const used = new Map();
 	const headers = [];
 	for (const line of markdown.replace(FRONTMATTER_PATTERN, "").split(/\r?\n/)) {
-		const match = line.match(/^(#{1,6})\s+(.+?)\s*#*\s*$/);
+		const match = line.match(/^(?:>\s*)*(#{1,6})\s+(.+?)\s*#*\s*$/);
 		if (!match) continue;
 		const heading = match[2].replace(/\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g, (_value, target, label) => label || target).trim();
 		const base = slugifyHeading(heading);

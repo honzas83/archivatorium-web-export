@@ -23,6 +23,11 @@ citekey: Source-2026
 
 Text with [[Target]] and [Report source](Report.pdf). #Topic/Child
 
+> [!abstract]
+> # Abstract heading
+> ## Categories/Topics
+> Abstract content.
+
 > [!info] Metadata
 > Metadata should not be searchable.
 
@@ -51,6 +56,11 @@ Text with [[Target]] and [Report source](Report.pdf). #Topic/Child
 		const attachment = records.find((record) => record.data?.sourcePath === "Folder/Report.pdf");
 		assert.equal(source.data.exportPath, "folder/source.html");
 		assert.deepEqual(source.data.aliases, ["Source alias"]);
+		assert.deepEqual(source.data.headers, [
+			{ heading: "Source heading", level: 1, id: "source-heading" },
+			{ heading: "Abstract heading", level: 1, id: "abstract-heading" },
+			{ heading: "Categories/Topics", level: 2, id: "categoriestopics" },
+		]);
 		assert.deepEqual(source.data.attachments, ["folder/report.pdf"]);
 		assert.deepEqual(source.data.links.sort(), ["folder/report.pdf", "folder/target.html"]);
 		assert.match(source.search.content, /Text with Target and \[Report source\]/);

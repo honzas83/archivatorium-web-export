@@ -28,5 +28,7 @@ theme assets.
   export. Citation code blocks wrap, use the monospace font, and expose a
   working copy button.
 - The right sidebar shows a hierarchical, collapsible Table of contents for
-  the open document. Its active item follows the reading position.
+  the open document, including headings nested inside Abstract callouts. The
+  document title and top-level leaf headings are emphasized while nested
+  headings use normal weight. Its active item follows the reading position.
 - The SPA does not render or initialize the interactive graph.
