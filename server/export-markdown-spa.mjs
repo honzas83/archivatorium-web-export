@@ -373,7 +373,13 @@ export async function exportMarkdownSpa({ vaultRoot, exportRoot, configPath } = 
 	vaultRoot = path.resolve(vaultRoot);
 	exportRoot = path.resolve(exportRoot);
 	const settingsPath = configPath ?? path.join(vaultRoot, ".obsidian/plugins/archivatorium-web-export/data.json");
-	const config = JSON.parse(await readFile(settingsPath, "utf8"));
+	let config = {};
+	try {
+		config = JSON.parse(await readFile(settingsPath, "utf8"));
+	} catch (error) {
+		if (error?.code !== "ENOENT" || configPath) throw error;
+		console.log("[node-export] Plugin data.json not found; using default export settings.");
+	}
 	const options = config.exportOptions ?? {};
 	await mkdir(exportRoot, { recursive: true });
 	const databaseRoot = path.join(exportRoot, ".server-data");

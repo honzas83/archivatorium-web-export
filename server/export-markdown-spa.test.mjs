@@ -36,6 +36,11 @@ Text with [[Target]] and [Report source](Report.pdf). #Topic/Child
 	await writeFile(config, JSON.stringify({ exportOptions: { siteName: "Fixture archive" } }));
 
 	try {
+		const defaultOutput = path.join(root, "default-output");
+		await exportMarkdownSpa({ vaultRoot: vault, exportRoot: defaultOutput });
+		const defaultMetadata = JSON.parse(await readFile(path.join(defaultOutput, "site-lib", "metadata.json"), "utf8"));
+		assert.equal(defaultMetadata.siteName, "vault");
+
 		const firstExport = await exportMarkdownSpa({ vaultRoot: vault, exportRoot: output, configPath: config });
 		assert.equal(firstExport.writtenRecords, 3);
 		const database = new DatabaseSync(path.join(output, ".server-data", "corpus.sqlite"));
