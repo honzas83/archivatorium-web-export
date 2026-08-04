@@ -226,10 +226,6 @@ export class ObsidianWebsite {
 
 					if (!this.tags) {
 						this.tags = new Tags(tagTree);
-					} else {
-						this.tags?.modifyDependencies((d) => {
-							d.tagTree = tagTree;
-						});
 					}
 
 					if (tagTree.length == 0) {
