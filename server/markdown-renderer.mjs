@@ -117,6 +117,12 @@ export class MarkdownDocumentRenderer {
 
 	replaceObsidianSyntax(markdown) {
 		const withMarkdownLinks = markdown.replace(/(!?)\[([^\]]*)\]\(((?:[^()\s]|\([^)]*\))+)(?:\s+['"][^)]*['"])?\)/g, (match, embed, rawLabel, rawTarget) => {
+			const tagQuery = rawTarget.match(/(?:[?&]query=tag:)([^&#\s)]+)/i)?.[1];
+			if (tagQuery) {
+				const tag = decodeURIComponent(tagQuery).replace(/^#+/, "");
+				const label = rawLabel.trim() || `#${tag}`;
+				return `<a class="tag" href="/?query=tag:${encodeURIComponent(tag)}">${label}</a>`;
+			}
 			const [target, rawHeading] = rawTarget.split("#", 2);
 			const resolved = this.resolveLink(target.trim());
 			if (!resolved) return match;
@@ -152,7 +158,7 @@ export class MarkdownDocumentRenderer {
 		});
 
 		return withLinks.replace(TAG_PATTERN, (_match, prefix, tag) => {
-			return `${prefix}<a class="tag" href="?query=tag:${encodeURIComponent(tag)}">#${tag}</a>`;
+			return `${prefix}<a class="tag" href="/?query=tag:${encodeURIComponent(tag)}">#${tag}</a>`;
 		});
 	}
 }

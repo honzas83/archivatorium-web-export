@@ -12,6 +12,7 @@ title: Hidden frontmatter
 [[Target|Linked target]] ![[Map.png]] ![[Report.pdf]]
 [Markdown target](Target.md)
 [Punctuated target](Target(1).md)
+[Legacy tag](http://127.0.0.1:8000/?query=tag:Entities%2FOrg%2FNATO)
 
 | Column | Value |
 | --- | --- |
@@ -49,6 +50,7 @@ title: Hidden frontmatter
 	assert.match(first, /<a class="internal-link" href="target.html">Linked target<\/a>/);
 	assert.match(first, /<a class="internal-link" href="target.html">Markdown target<\/a>/);
 	assert.match(first, /<a class="internal-link" href="target.html">Punctuated target<\/a>/);
+	assert.match(first, /<a class="tag" href="\/\?query=tag:Entities%2FOrg%2FNATO">Legacy tag<\/a>/);
 	assert.match(first, /<img class="internal-embed" src="\/assets\/map.png" alt="Map.png">/);
 	assert.match(first, /<iframe class="internal-embed" src="\/assets\/report.pdf" title="Report.pdf"><\/iframe>/);
 	assert.match(first, /<table>/);

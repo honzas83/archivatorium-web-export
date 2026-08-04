@@ -71,7 +71,15 @@ export class LinkHandler
 
 	public static getQueryFromURL(url: string): string
 	{
-		return url.split("?")[1]?.trim() ?? "";
+		const query = url.split("?")[1]?.trim() ?? "";
+		try
+		{
+			return decodeURIComponent(query);
+		}
+		catch
+		{
+			return query;
+		}
 	}
 
 	public static getFileDataIdFromURL(url: string): string

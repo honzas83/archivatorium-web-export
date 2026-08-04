@@ -115,15 +115,18 @@ export class Search
 			}
 		}
 
-		ObsidianSite.fileTree?.filter(showPaths);
-		ObsidianSite.fileTree?.setSubHeadings(headerLinks);
-		ObsidianSite.fileTree?.sort((a, b) =>
+		if (!ObsidianSite.lazyNavigation)
 		{
-			if (!a || !b) return 0;
-			return showPaths.findIndex((path) => a.path == path) - showPaths.findIndex((path) => b.path == path);
-		});
+			ObsidianSite.fileTree?.filter(showPaths);
+			ObsidianSite.fileTree?.setSubHeadings(headerLinks);
+			ObsidianSite.fileTree?.sort((a, b) =>
+			{
+				if (!a || !b) return 0;
+				return showPaths.findIndex((path) => a.path == path) - showPaths.findIndex((path) => b.path == path);
+			});
+		}
 
-		if (!ObsidianSite.fileTree)
+		if (!ObsidianSite.fileTree || ObsidianSite.lazyNavigation)
 		{
 			const list = document.createElement('div');
 			results.filter((result: any) => this.getResultPath(result).endsWith(".html"))
@@ -362,7 +365,7 @@ export class Search
 			}
 		});
 
-		if (!ObsidianSite.fileTree)
+		if (!ObsidianSite.fileTree || ObsidianSite.lazyNavigation)
 		{
 			this.dedicatedSearchResultsList = document.createElement('div');
 			this.dedicatedSearchResultsList.setAttribute('id', 'search-results');

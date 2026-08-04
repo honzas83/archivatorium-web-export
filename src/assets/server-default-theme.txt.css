@@ -5,6 +5,8 @@
   --font-text: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
   --font-monospace: "SFMono-Regular", Consolas, monospace;
   --font-text-size: 16px;
+  --font-small: 13px;
+  --font-smallest: 12px;
   --line-height-normal: 1.5;
   --line-height-tight: 1.3;
   --line-width: min(640px, calc(100vw - 2em));
@@ -43,6 +45,7 @@ body.theme-light {
   --interactive-normal: #f2f2f2;
   --interactive-hover: #e9e9e9;
   --interactive-success: #218739;
+  --text-on-accent: #ffffff;
   --icon-color: #666666;
   --icon-color-hover: #222222;
   --icon-color-focused: #222222;
@@ -72,6 +75,7 @@ body.theme-dark {
   --interactive-normal: #343538;
   --interactive-hover: #3d3e42;
   --interactive-success: #74c98a;
+  --text-on-accent: #ffffff;
   --icon-color: #a8a9ad;
   --icon-color-hover: #dcddde;
   --icon-color-focused: #dcddde;
@@ -92,6 +96,18 @@ body {
   overflow: hidden;
 }
 button, input, select, textarea { font: inherit; color: inherit; }
+button {
+  min-height: 2em;
+  padding: .25em .75em;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background: var(--interactive-normal);
+  cursor: pointer;
+}
+button:hover:not(:disabled) { background: var(--interactive-hover); }
+button:disabled { cursor: default; opacity: .5; }
+button.mod-cta { border-color: transparent; background: var(--interactive-accent); color: var(--text-on-accent); }
+button.mod-cta:hover:not(:disabled) { background: var(--interactive-accent-hover); }
 a { color: var(--text-accent); text-decoration: none; cursor: pointer; }
 a:hover { color: var(--text-accent-hover); text-decoration: underline; }
 
