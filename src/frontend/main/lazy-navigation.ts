@@ -79,20 +79,24 @@ export class LazyNavigation {
 		if (!response.ok) throw new Error("Failed to load navigation folder.");
 		const payload = await response.json() as NavigationResponse;
 		for (const entry of payload.items) {
-			const item = this.tree.appendItem(parent, this.createItemElement(entry));
+			const item = this.tree.appendItem(parent, this.createItemElement(entry, parent.depth + 1));
 			if (entry.kind === "folder") item.path = entry.path;
 			if (entry.kind === "folder") {
-				item.selfEl.addEventListener("click", () => {
+				const loadFolder = () => {
 					void this.loadChildren(item, entry.path).catch((error) => console.error("Failed to load navigation folder", error));
-				});
+				};
+				item.selfEl.addEventListener("click", loadFolder);
+				// Keep the chevron independently actionable, including for keyboard users.
+				item.collapseIconEl?.addEventListener("click", loadFolder);
 			}
 		}
 		this.loadedParents.add(parentPath);
 	}
 
-	private createItemElement(entry: NavigationItem): HTMLElement {
+	private createItemElement(entry: NavigationItem, depth: number): HTMLElement {
 		const item = document.createElement("div");
 		item.classList.add("tree-item", entry.kind === "folder" ? "nav-folder" : "nav-file");
+		item.dataset.depth = String(depth);
 		if (entry.kind === "folder" && entry.hasChildren) item.classList.add("mod-collapsible", "is-collapsed");
 
 		const self = document.createElement(entry.kind === "document" ? "a" : "div");
@@ -100,7 +104,10 @@ export class LazyNavigation {
 		self.setAttribute("data-path", entry.path);
 		if (entry.kind === "document" && entry.exportPath) self.setAttribute("href", entry.exportPath);
 		if (entry.kind === "folder") {
-			const icon = document.createElement("div");
+			const icon = document.createElement("button");
+			icon.type = "button";
+			icon.setAttribute("aria-label", `Toggle ${entry.name}`);
+			icon.setAttribute("title", `Toggle ${entry.name}`);
 			icon.classList.add("tree-item-icon", "collapse-icon", "nav-folder-collapse-indicator", "is-collapsed");
 			icon.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="svg-icon right-triangle"><path d="M3 8L12 17L21 8"></path></svg>';
 			self.appendChild(icon);

@@ -19,3 +19,89 @@ body {
   font-weight: 700;
   line-height: 31.0656px;
 }
+
+.obsidian-document,
+.obsidian-document .markdown-preview-sizer {
+  font-size: 16px;
+  line-height: 24px;
+}
+
+/* Match the navigation geometry of the regular exported site. */
+.tree-container {
+  --nav-item-size: 14px;
+  --nav-item-children-margin-start: 12px;
+  --collapse-arrow-size: 11px;
+}
+
+.tree-item-self {
+  min-height: 0;
+  padding: 4px 8px 4px 24px;
+  border-radius: 0;
+  color: var(--text-muted);
+  font-size: var(--nav-item-size);
+  line-height: 1.3em;
+}
+
+.tree-item-self:hover,
+.tree-item-self.is-active {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+.tree-item-children {
+  margin-left: 12px;
+  padding-left: 4px;
+  border-left: 1px solid var(--background-modifier-border);
+}
+
+.tree-item-icon.collapse-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 16px;
+  width: 16px;
+  height: 16px;
+  margin-left: -20px;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--nav-collapse-icon-color, var(--text-muted));
+  cursor: pointer;
+}
+
+.tree-item-icon.collapse-icon:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+.tree-item-icon.collapse-icon:focus-visible {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: 1px;
+}
+
+.tree-item-icon.collapse-icon svg.svg-icon {
+  width: var(--collapse-arrow-size);
+  height: var(--collapse-arrow-size);
+}
+
+#search-wrapper .search-icon {
+  position: absolute;
+  z-index: 1;
+  top: 50%;
+  left: .7em;
+  width: 1.25em;
+  height: 1.25em;
+  transform: translateY(-50%);
+  color: var(--text-muted);
+  pointer-events: none;
+}
+
+#search-wrapper .search-icon svg {
+  width: 100%;
+  height: 100%;
+}
+
+#search-wrapper input {
+  padding-left: 2.5em;
+}
