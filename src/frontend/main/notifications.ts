@@ -4,7 +4,7 @@ export class Notice
 	private static container: HTMLElement;
 	public notification: HTMLElement;
 
-	constructor(public message: string, public duration: number = 5000)
+	constructor(public message: string, public duration: number = 5000, public className?: string)
 	{
 		this.show();
 	}
@@ -22,6 +22,8 @@ export class Notice
 
 		this.notification = document.createElement("div");
 		this.notification.classList.add("notice");
+		if (this.className) this.notification.classList.add(this.className);
+		this.notification.setAttribute("role", "status");
 		this.notification.innerHTML = this.message;
 		Notice.container.appendChild(this.notification);
 

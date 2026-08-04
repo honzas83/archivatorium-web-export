@@ -39,6 +39,7 @@ export class Search
 	private serverSide: boolean = false;
 	private searchEndpoint: string = "/api/search";
 	private searchRequestId: number = 0;
+	private limitNotice: Notice | undefined;
 	private static readonly inlineMarkClass = "search-mark";
 	private static readonly tagMarkClass = "search-tag-mark";
 	private static readonly visibleResultLimit = 1000;
@@ -52,6 +53,7 @@ export class Search
 		}
 
 		this.input.value = query;
+		this.container?.classList.add("has-content");
 
 		if (type != allSearch)
 		{
@@ -69,7 +71,19 @@ export class Search
 		if (results.length > Search.visibleResultLimit)
 		{
 			results = results.slice(0, Search.visibleResultLimit);
-			new Notice("Showing the first 1,000 results. Refine the search to narrow it down.");
+			if (!this.limitNotice?.notification?.isConnected)
+			{
+				this.limitNotice = new Notice(
+					"More than 1,000 results found. Showing the first 1,000; refine your search to narrow them down.",
+					8000,
+					"search-limit-notice",
+				);
+			}
+		}
+		else if (this.limitNotice?.notification?.isConnected)
+		{
+			this.limitNotice.dismiss();
+			this.limitNotice = undefined;
 		}
 		
 		// filter results for the best matches and generate extra metadata
@@ -290,6 +304,8 @@ export class Search
 	{
 		this.searchRequestId++;
 		this.container?.classList.remove("has-content");
+		this.limitNotice?.dismiss();
+		this.limitNotice = undefined;
 		this.input.value = "";
 		this.clearCurrentDocumentSearch();
 		if (ObsidianSite.lazyNavigation) void ObsidianSite.lazyNavigation.clearFilter();
@@ -333,9 +349,20 @@ export class Search
 		}
 
 		const inputClear = document.querySelector('#search-clear-button');
+		inputClear?.setAttribute("role", "button");
+		inputClear?.setAttribute("tabindex", "0");
 		inputClear?.addEventListener('click', (event) => 
 		{
 			this.clear();
+		});
+		inputClear?.addEventListener('keydown', (event) =>
+		{
+			if ((event as KeyboardEvent).key === "Enter" || (event as KeyboardEvent).key === " ")
+			{
+				event.preventDefault();
+				this.clear();
+				this.input.focus();
+			}
 		});
 
 		this.input.addEventListener('input', async (event) =>
