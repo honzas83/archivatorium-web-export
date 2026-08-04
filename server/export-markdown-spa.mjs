@@ -121,6 +121,32 @@ async function walkFiles(vaultRoot, relative = "") {
 	return files;
 }
 
+async function readExistingCorpus(corpusRoot) {
+	const records = new Map();
+	try {
+		const entries = await readdir(corpusRoot, { withFileTypes: true });
+		for (const entry of entries) {
+			if (!entry.isFile() || !entry.name.endsWith(".json")) continue;
+			const serialized = await readFile(path.join(corpusRoot, entry.name), "utf8");
+			try {
+				records.set(entry.name, { serialized, record: JSON.parse(serialized) });
+			} catch {
+				// A damaged record is replaced by the next export.
+			}
+		}
+	} catch (error) {
+		if (error?.code !== "ENOENT") throw error;
+	}
+	return records;
+}
+
+function isCurrentSourceRecord(record, sourcePath, sourceStat) {
+	const data = record?.data;
+	return data?.sourcePath === sourcePath &&
+		data.modifiedTime === sourceStat.mtimeMs &&
+		data.sourceSize === sourceStat.size;
+}
+
 function resolveWikiTarget(rawTarget, sourcePath, documents, basenames) {
 	const target = rawTarget.trim().replaceAll("\\", "/");
 	if (!target) return undefined;
@@ -193,8 +219,8 @@ export async function exportMarkdownSpa({ vaultRoot, exportRoot, configPath } = 
 	const options = config.exportOptions ?? {};
 	const corpusRoot = path.join(exportRoot, "site-lib", "corpus");
 	await mkdir(exportRoot, { recursive: true });
-	await rm(corpusRoot, { recursive: true, force: true });
 	await mkdir(corpusRoot, { recursive: true });
+	const existingCorpus = await readExistingCorpus(corpusRoot);
 
 	const allSourcePaths = await walkFiles(vaultRoot);
 	const sourcePaths = allSourcePaths.filter((sourcePath) => sourcePath.toLowerCase().endsWith(".md"))
@@ -203,20 +229,35 @@ export async function exportMarkdownSpa({ vaultRoot, exportRoot, configPath } = 
 	const basenames = new Map();
 	for (const sourcePath of allSourcePaths) {
 		const absolutePath = path.join(vaultRoot, sourcePath);
-		const document = { sourcePath, absolutePath, exportPath: exportPath(sourcePath) };
+		const sourceStat = await stat(absolutePath);
+		const document = { sourcePath, absolutePath, sourceStat, exportPath: exportPath(sourcePath) };
 		if (sourcePath.toLowerCase().endsWith(".md")) {
-			[document.markdown, document.sourceStat] = await Promise.all([readFile(absolutePath, "utf8"), stat(absolutePath)]);
+			const existing = existingCorpus.get(corpusFilename(document.exportPath));
+			if (isCurrentSourceRecord(existing?.record, sourcePath, sourceStat)) document.cachedRecord = existing.record;
+			else document.markdown = await readFile(absolutePath, "utf8");
 		}
 		documents.set(sourcePath, document);
 		const basename = path.posix.basename(sourcePath, path.posix.extname(sourcePath));
 		if (!basenames.has(basename)) basenames.set(basename, document);
 	}
 
+	const documentsByExportPath = new Map(Array.from(documents.values()).map((document) => [document.exportPath, document]));
 	const backlinks = new Map(sourcePaths.map((sourcePath) => [sourcePath, new Set()]));
 	const attachmentRecords = new Map();
 	const pageRecords = [];
 	for (let index = 0; index < sourcePaths.length; index++) {
 		const document = documents.get(sourcePaths[index]);
+		if (document.cachedRecord) {
+			const data = document.cachedRecord.data;
+			pageRecords.push({
+				document,
+				cachedRecord: document.cachedRecord,
+				links: new Set(data.links ?? []),
+				attachments: new Set(data.attachments ?? []),
+				treeOrder: index + 1,
+			});
+			continue;
+		}
 		const frontmatter = parseFrontmatter(document.markdown);
 		const headers = getHeaders(document.markdown);
 		const inlineTags = Array.from(document.markdown.matchAll(TAG_PATTERN), (match) => `#${match[2]}`);
@@ -228,8 +269,6 @@ export async function exportMarkdownSpa({ vaultRoot, exportRoot, configPath } = 
 			const target = resolveWikiTarget(match[2], document.sourcePath, documents, basenames);
 			if (!target) continue;
 			links.add(target.exportPath);
-			if (target.sourcePath.toLowerCase().endsWith(".md")) backlinks.get(target.sourcePath).add(document.exportPath);
-			else attachmentRecords.set(target.sourcePath, target);
 			if (match[1]) attachments.add(target.exportPath);
 		}
 		const aliases = stringArray(frontmatter.values.aliases);
@@ -242,44 +281,76 @@ export async function exportMarkdownSpa({ vaultRoot, exportRoot, configPath } = 
 	}
 
 	for (const entry of pageRecords) {
-		const { document, frontmatter, headers, inlineTags, frontmatterTags, aliases, title, links, attachments, content, treeOrder } = entry;
-		const data = {
-			createdTime: document.sourceStat.ctimeMs,
-			modifiedTime: document.sourceStat.mtimeMs,
-			sourceSize: document.sourceStat.size,
-			sourcePath: document.sourcePath,
-			exportPath: document.exportPath,
-			showInTree: true,
-			treeOrder,
-			backlinks: Array.from(backlinks.get(document.sourcePath)),
-			type: "markdown",
-			data: null,
-			title,
-			aliases,
-			inlineTags,
-			frontmatterTags,
-			headers,
-			links: Array.from(links),
-			attachments: Array.from(attachments),
-			pathToRoot: ".",
-			icon: String(frontmatter.values.icon ?? ""),
-			description: String(frontmatter.values.description ?? frontmatter.values.summary ?? content.slice(0, 500)),
-			author: String(frontmatter.values.author ?? ""),
-			rssDate: String(frontmatter.values.date ?? new Date(document.sourceStat.mtimeMs).toISOString()),
-			coverImageURL: "",
-			fullURL: "",
-		};
-		const record = {
-			kind: "webpage",
-			data,
-			redirectValues: stringArray(frontmatter.values.citekey).map((value) => value.toLowerCase().replace(/[^a-z0-9]/g, "")).filter(Boolean),
-			search: { metadata: frontmatter.text, headers: headers.map((header) => header.heading), content },
-		};
-		await writeFile(path.join(corpusRoot, corpusFilename(data.exportPath)), JSON.stringify(record));
+		for (const linkedExportPath of entry.links) {
+			const target = documentsByExportPath.get(linkedExportPath);
+			if (!target) continue;
+			if (target.sourcePath.toLowerCase().endsWith(".md")) backlinks.get(target.sourcePath).add(entry.document.exportPath);
+			else attachmentRecords.set(target.sourcePath, target);
+		}
+	}
+
+	const generatedFilenames = new Set();
+	let writtenRecords = 0;
+	let reusedRecords = 0;
+	let removedRecords = 0;
+	async function writeRecord(exportedPath, record) {
+		const filename = corpusFilename(exportedPath);
+		generatedFilenames.add(filename);
+		const serialized = JSON.stringify(record);
+		if (existingCorpus.get(filename)?.serialized === serialized) {
+			reusedRecords++;
+			return;
+		}
+		await writeFile(path.join(corpusRoot, filename), serialized);
+		writtenRecords++;
+	}
+
+	for (const entry of pageRecords) {
+		const { document, links, attachments, treeOrder } = entry;
+		let record;
+		if (entry.cachedRecord) {
+			record = { ...entry.cachedRecord, data: { ...entry.cachedRecord.data } };
+			record.data.treeOrder = treeOrder;
+			record.data.backlinks = Array.from(backlinks.get(document.sourcePath));
+		} else {
+			const { frontmatter, headers, inlineTags, frontmatterTags, aliases, title, content } = entry;
+			const data = {
+				createdTime: document.sourceStat.ctimeMs,
+				modifiedTime: document.sourceStat.mtimeMs,
+				sourceSize: document.sourceStat.size,
+				sourcePath: document.sourcePath,
+				exportPath: document.exportPath,
+				showInTree: true,
+				treeOrder,
+				backlinks: Array.from(backlinks.get(document.sourcePath)),
+				type: "markdown",
+				data: null,
+				title,
+				aliases,
+				inlineTags,
+				frontmatterTags,
+				headers,
+				links: Array.from(links),
+				attachments: Array.from(attachments),
+				pathToRoot: ".",
+				icon: String(frontmatter.values.icon ?? ""),
+				description: String(frontmatter.values.description ?? frontmatter.values.summary ?? content.slice(0, 500)),
+				author: String(frontmatter.values.author ?? ""),
+				rssDate: String(frontmatter.values.date ?? new Date(document.sourceStat.mtimeMs).toISOString()),
+				coverImageURL: "",
+				fullURL: "",
+			};
+			record = {
+				kind: "webpage",
+				data,
+				redirectValues: stringArray(frontmatter.values.citekey).map((value) => value.toLowerCase().replace(/[^a-z0-9]/g, "")).filter(Boolean),
+				search: { metadata: frontmatter.text, headers: headers.map((header) => header.heading), content },
+			};
+		}
+		await writeRecord(document.exportPath, record);
 	}
 
 	for (const attachment of attachmentRecords.values()) {
-		if (!attachment.sourceStat) attachment.sourceStat = await stat(attachment.absolutePath);
 		const data = {
 			createdTime: attachment.sourceStat.ctimeMs,
 			modifiedTime: attachment.sourceStat.mtimeMs,
@@ -292,7 +363,12 @@ export async function exportMarkdownSpa({ vaultRoot, exportRoot, configPath } = 
 			type: "attachment",
 			data: null,
 		};
-		await writeFile(path.join(corpusRoot, corpusFilename(data.exportPath)), JSON.stringify({ kind: "file", data }));
+		await writeRecord(data.exportPath, { kind: "file", data });
+	}
+	for (const filename of existingCorpus.keys()) {
+		if (generatedFilenames.has(filename)) continue;
+		await rm(path.join(corpusRoot, filename), { force: true });
+		removedRecords++;
 	}
 
 	const siteName = options.siteName || path.basename(vaultRoot);
@@ -304,7 +380,8 @@ export async function exportMarkdownSpa({ vaultRoot, exportRoot, configPath } = 
 		themeName: "", bodyClasses: "", hasFavicon: false, serverMetadata: true,
 		featureOptions: featureOptions(options),
 	}));
-	console.log(`[node-export] wrote ${pageRecords.length} documents and ${attachmentRecords.size} referenced attachments`);
+	console.log(`[node-export] wrote ${writtenRecords}, reused ${reusedRecords}, and removed ${removedRecords} corpus records (${pageRecords.length} documents, ${attachmentRecords.size} referenced attachments)`);
+	return { writtenRecords, reusedRecords, removedRecords, documents: pageRecords.length, attachments: attachmentRecords.size };
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

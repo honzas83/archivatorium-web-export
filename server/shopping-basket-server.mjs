@@ -131,14 +131,22 @@ async function initializeCorpusDatabase() {
 			value TEXT PRIMARY KEY, export_path TEXT NOT NULL
 		);
 		CREATE TABLE IF NOT EXISTS corpus_state (
-			filename TEXT PRIMARY KEY, export_path TEXT NOT NULL, modified_time REAL NOT NULL, size INTEGER NOT NULL
+			filename TEXT PRIMARY KEY, export_path TEXT NOT NULL, modified_time REAL NOT NULL, size INTEGER NOT NULL,
+			source_modified_time REAL, source_size INTEGER
 		);
 		CREATE INDEX IF NOT EXISTS metadata_documents_source_path ON metadata_documents(source_path);
 		CREATE INDEX IF NOT EXISTS metadata_documents_tree ON metadata_documents(show_in_tree, tree_order);
 	`);
+	for (const column of ["source_modified_time REAL", "source_size INTEGER"]) {
+		try {
+			database.exec(`ALTER TABLE corpus_state ADD COLUMN ${column}`);
+		} catch (error) {
+			if (!String(error?.message).includes("duplicate column name")) throw error;
+		}
+	}
 
 	const knownRecords = new Map(database.prepare(
-		"SELECT filename, export_path, modified_time, size FROM corpus_state"
+		"SELECT filename, export_path, modified_time, size, source_modified_time, source_size FROM corpus_state"
 	).all().map((record) => [record.filename, record]));
 	const deleteMetadata = database.prepare("DELETE FROM metadata_documents WHERE export_path = ?");
 	const deleteRedirects = database.prepare("DELETE FROM metadata_redirects WHERE export_path = ?");
@@ -158,8 +166,9 @@ async function initializeCorpusDatabase() {
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 	`);
 	const updateState = database.prepare(`
-		INSERT OR REPLACE INTO corpus_state(filename, export_path, modified_time, size)
-		VALUES (?, ?, ?, ?)
+		INSERT OR REPLACE INTO corpus_state(
+			filename, export_path, modified_time, size, source_modified_time, source_size
+		) VALUES (?, ?, ?, ?, ?, ?)
 	`);
 
 	let entries = [];
@@ -182,9 +191,13 @@ async function initializeCorpusDatabase() {
 			const recordPath = path.join(CORPUS_ROOT, entry.name);
 			const recordStat = await stat(recordPath);
 			const previous = knownRecords.get(entry.name);
-			if (previous?.modified_time !== recordStat.mtimeMs || previous?.size !== recordStat.size) {
-				const record = JSON.parse(await readFile(recordPath, "utf8"));
-				const data = record?.data;
+			const record = JSON.parse(await readFile(recordPath, "utf8"));
+			const data = record?.data;
+			const sourceModifiedTime = Number(data?.modifiedTime ?? recordStat.mtimeMs);
+			const sourceSize = Number(data?.sourceSize ?? recordStat.size);
+			const recordChanged = previous?.modified_time !== recordStat.mtimeMs || previous?.size !== recordStat.size;
+			const sourceChanged = previous?.source_modified_time !== sourceModifiedTime || previous?.source_size !== sourceSize;
+			if (recordChanged || sourceChanged) {
 				if (data?.exportPath && data?.sourcePath) {
 					if (previous?.export_path) {
 						deleteMetadata.run(previous.export_path);
@@ -212,7 +225,10 @@ async function initializeCorpusDatabase() {
 							joinSearchValues(record.search.headers), joinSearchValues(tags), record.search.content ?? ""
 						);
 					}
-					updateState.run(entry.name, data.exportPath, recordStat.mtimeMs, recordStat.size);
+					updateState.run(
+						entry.name, data.exportPath, recordStat.mtimeMs, recordStat.size,
+						sourceModifiedTime, sourceSize
+					);
 				}
 			}
 			if (corpusStatus.processed % INDEX_COMMIT_INTERVAL === 0) {

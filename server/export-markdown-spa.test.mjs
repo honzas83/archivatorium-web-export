@@ -35,7 +35,8 @@ Text with [[Target]] and ![[Report.pdf]]. #Topic/Child
 	await writeFile(config, JSON.stringify({ exportOptions: { siteName: "Fixture archive" } }));
 
 	try {
-		await exportMarkdownSpa({ vaultRoot: vault, exportRoot: output, configPath: config });
+		const firstExport = await exportMarkdownSpa({ vaultRoot: vault, exportRoot: output, configPath: config });
+		assert.equal(firstExport.writtenRecords, 3);
 		const corpusRoot = path.join(output, "site-lib", "corpus");
 		const records = await Promise.all((await readdir(corpusRoot)).map(async (filename) =>
 			JSON.parse(await readFile(path.join(corpusRoot, filename), "utf8"))
@@ -56,6 +57,15 @@ Text with [[Target]] and ![[Report.pdf]]. #Topic/Child
 		assert.equal((shell.match(/sidebar-collapse-icon/g) ?? []).length, 2);
 		assert.equal((shell.match(/sidebar-handle/g) ?? []).length, 2);
 		assert.equal(JSON.parse(await readFile(path.join(output, "site-lib", "metadata.json"), "utf8")).serverMetadata, true);
+
+		const unchangedExport = await exportMarkdownSpa({ vaultRoot: vault, exportRoot: output, configPath: config });
+		assert.equal(unchangedExport.writtenRecords, 0);
+		assert.equal(unchangedExport.reusedRecords, 3);
+
+		await writeFile(path.join(vault, "Folder", "Target.md"), "# Target\n\nChanged target text.");
+		const changedExport = await exportMarkdownSpa({ vaultRoot: vault, exportRoot: output, configPath: config });
+		assert.equal(changedExport.writtenRecords, 1);
+		assert.equal(changedExport.reusedRecords, 2);
 	} finally {
 		await rm(root, { recursive: true, force: true });
 	}
