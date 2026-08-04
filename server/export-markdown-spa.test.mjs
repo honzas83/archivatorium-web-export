@@ -51,7 +51,10 @@ Text with [[Target]] and ![[Report.pdf]]. #Topic/Child
 		assert.doesNotMatch(source.search.content, /Metadata should not be searchable|Citation should not be searchable|#Topic\/Child|<span>/);
 		assert.equal(attachment.kind, "file");
 		assert.equal(attachment.data.exportPath, "folder/report.pdf");
-		assert.match(await readFile(path.join(output, "index.html"), "utf8"), /webpage.js/);
+		const shell = await readFile(path.join(output, "index.html"), "utf8");
+		assert.match(shell, /webpage.js/);
+		assert.equal((shell.match(/sidebar-collapse-icon/g) ?? []).length, 2);
+		assert.equal((shell.match(/sidebar-handle/g) ?? []).length, 2);
 		assert.equal(JSON.parse(await readFile(path.join(output, "site-lib", "metadata.json"), "utf8")).serverMetadata, true);
 	} finally {
 		await rm(root, { recursive: true, force: true });
