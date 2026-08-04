@@ -67,6 +67,7 @@ export class ObsidianWebsite {
 	public shoppingBasket: ShoppingBasket | undefined = undefined;
 
 	public entryPage: string;
+	private outlineObserver: IntersectionObserver | undefined = undefined;
 
 	private onloadCallbacks: ((document: ObsidianDocument) => void)[] = [];
 	public onDocumentLoad(callback: (document: ObsidianDocument) => void) {
@@ -114,7 +115,6 @@ export class ObsidianWebsite {
 		const fileTreeEl = document.querySelector(
 			"#file-explorer"
 		) as HTMLElement;
-		const outlineTreeEl = document.querySelector("#outline") as HTMLElement;
 		const leftSidebarEl = document.querySelector(
 			".sidebar#left-sidebar"
 		) as HTMLElement;
@@ -132,7 +132,6 @@ export class ObsidianWebsite {
 			await this.lazyNavigation.initialize();
 			this.fileTree = this.lazyNavigation.tree;
 		} else if (fileTreeEl) this.fileTree = new Tree(fileTreeEl);
-		if (outlineTreeEl) this.outlineTree = new Tree(outlineTreeEl, this.metadata.featureOptions.outline.minCollapseDepth);
 		if (leftSidebarEl) this.leftSidebar = new Sidebar(leftSidebarEl);
 		if (rightSidebarEl) this.rightSidebar = new Sidebar(rightSidebarEl);
 		this.search = await new Search().init();
@@ -178,6 +177,7 @@ export class ObsidianWebsite {
 		FilePreviewPopover.loadPinnedPreviews();
 
 		this.onDocumentLoad((doc) => {
+			this.updateOutline(doc);
 
 			if (!ObsidianSite.metadata.ignoreMetadata) {
 				const insertBacklinks =
@@ -377,14 +377,6 @@ export class ObsidianWebsite {
 			);
 		}
 
-		// update outline - TODO: make this a dynamic inserted feature
-		let newOutlineEl = page.sourceHtml.querySelector("#outline") as HTMLElement;
-		if (newOutlineEl) {
-			newOutlineEl = document.adoptNode(newOutlineEl);
-			document.querySelector("#outline")?.replaceWith(newOutlineEl);
-			ObsidianSite.outlineTree = new Tree(newOutlineEl, this.metadata.featureOptions.outline.minCollapseDepth);
-		}
-
 		setTimeout(async () => {
 
 			this.onloadCallbacks.forEach((cb) => cb(page));
@@ -398,6 +390,95 @@ export class ObsidianWebsite {
 		}, 100); // Small delay to ensure the DOM is updated
 
 		return page;
+	}
+
+	private updateOutline(page: ObsidianDocument): void {
+		this.outlineObserver?.disconnect();
+		this.outlineObserver = undefined;
+		document.querySelector("#outline")?.remove();
+
+		if (this.metadata.featureOptions.outline?.enabled === false || page.documentType !== DocumentType.Markdown) return;
+		const headers = page.info.headers ?? [];
+		if (headers.length === 0) return;
+
+		const outline = document.createElement("div");
+		outline.id = "outline";
+		outline.classList.add("tree-container", "outline-tree");
+		const featureHeader = document.createElement("div");
+		featureHeader.classList.add("feature-header");
+		const featureTitle = document.createElement("div");
+		featureTitle.classList.add("feature-title");
+		featureTitle.textContent = "Table of contents";
+		featureHeader.appendChild(featureTitle);
+		const collapseAll = document.createElement("button");
+		collapseAll.type = "button";
+		collapseAll.classList.add("clickable-icon", "nav-action-button", "tree-collapse-all");
+		collapseAll.setAttribute("aria-label", "Collapse or expand table of contents");
+		collapseAll.innerHTML = "<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'></svg>";
+		featureHeader.appendChild(collapseAll);
+		outline.appendChild(featureHeader);
+
+		const documentTitle = document.createElement("div");
+		documentTitle.classList.add("outline-document-title");
+		documentTitle.textContent = page.info.browserTitle ?? page.title;
+		outline.appendChild(documentTitle);
+
+		type OutlineEntry = { heading: string; id: string; level: number; children: OutlineEntry[] };
+		const root: OutlineEntry = { heading: "", id: "", level: 0, children: [] };
+		const stack: OutlineEntry[] = [root];
+		for (const header of headers) {
+			while (stack.length > 1 && stack[stack.length - 1].level >= header.level) stack.pop();
+			const entry: OutlineEntry = { ...header, children: [] };
+			stack[stack.length - 1].children.push(entry);
+			stack.push(entry);
+		}
+
+		const createItem = (entry: OutlineEntry, depth: number): HTMLElement => {
+			const item = document.createElement("div");
+			item.classList.add("tree-item");
+			item.dataset.depth = String(depth);
+			if (entry.children.length > 0) {
+				item.classList.add("mod-collapsible");
+				if (this.metadata.featureOptions.outline.startCollapsed === true) item.classList.add("is-collapsed");
+			}
+			const self = document.createElement("a");
+			self.classList.add("tree-item-self", "is-clickable");
+			self.href = `#${entry.id}`;
+			self.dataset.path = `#${entry.id}`;
+			if (entry.children.length > 0) {
+				const icon = document.createElement("div");
+				icon.classList.add("tree-item-icon", "collapse-icon");
+				icon.innerHTML = "<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' class='svg-icon right-triangle'><path d='M3 8L12 17L21 8'></path></svg>";
+				self.appendChild(icon);
+			}
+			const label = document.createElement("div");
+			label.classList.add("tree-item-inner", "heading-link");
+			label.textContent = entry.heading;
+			self.appendChild(label);
+			item.appendChild(self);
+			const children = document.createElement("div");
+			children.classList.add("tree-item-children");
+			for (const child of entry.children) children.appendChild(createItem(child, depth + 1));
+			item.appendChild(children);
+			return item;
+		};
+		for (const entry of root.children) outline.appendChild(createItem(entry, 1));
+
+		(document.querySelector("#right-sidebar-content") as HTMLElement | null)?.appendChild(outline);
+		this.outlineTree = new Tree(outline, this.metadata.featureOptions.outline.minCollapseDepth);
+		this.outlineTree.forAllChildren((item) => {
+			item.selfEl.addEventListener("click", () => item.setActive());
+		});
+
+		this.outlineObserver = new IntersectionObserver((entries) => {
+			const active = entries.filter((entry) => entry.isIntersecting)
+				.sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)[0];
+			if (active?.target instanceof HTMLElement) this.outlineTree?.findByPath(`#${active.target.id}`)?.setActive();
+		}, { root: this.centerContentEl, rootMargin: "-15% 0px -70% 0px" });
+		for (const header of headers) {
+			const heading = page.documentEl?.querySelector(`#${CSS.escape(header.id)}`);
+			if (heading) this.outlineObserver.observe(heading);
+		}
 	}
 
 	public async fetch(url: string): Promise<Response | undefined> {

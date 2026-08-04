@@ -47,7 +47,7 @@ class RightSidebarViewManager {
 
 		this.originalButtonEl = this.createViewButton(
 			"original",
-			"Table of contents & Interactive graph"
+			"Table of contents"
 		);
 		this.tagsButtonEl = this.createViewButton("tags", "Tags");
 		this.switcherEl.append(this.originalButtonEl, this.tagsButtonEl);
