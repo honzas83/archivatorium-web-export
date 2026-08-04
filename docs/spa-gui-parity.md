@@ -20,6 +20,8 @@ theme assets.
   an accessible × button when the input contains text.
 - Direct document URLs, browser back/forward navigation, Markdown links, and
   tag links keep the SPA loaded and update the current document.
+- Markdown documents with top-level tables expand to the complete available
+  center workspace; prose-only documents retain the readable line width.
 - A PDF link replaces the Markdown document in the center pane while both
   sidebars remain available.
 - Metadata, Abstract, and Citing this document callouts match the static

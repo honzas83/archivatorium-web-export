@@ -26,6 +26,13 @@ body {
   line-height: 24px;
 }
 
+/* Wide Markdown tables should use the complete center workspace instead of
+   being squeezed into the readable prose width. */
+body #center-content > .obsidian-document > .markdown-preview-sizer:has(> table) {
+  max-width: 100%;
+  flex-basis: 100%;
+}
+
 /* Match the navigation geometry of the regular exported site. */
 .tree-container {
   --nav-item-size: 14px;
