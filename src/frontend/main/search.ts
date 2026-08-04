@@ -76,10 +76,6 @@ export class Search
 			const resultPath = this.getResultPath(result);
 			if (!resultPath) continue;
 
-			// only show the most relevant results
-			if (type !== SearchType.Tags && ((result.score < results[0].score * 0.30 && showPaths.length > 4) || result.score < results[0].score * 0.1))
-				break;
-
 			showPaths.push(resultPath);
 			navigationItems.push({
 				sourcePath: String((result as any).sourcePath ?? ""),
@@ -131,6 +127,8 @@ export class Search
 				return showPaths.findIndex((path) => a.path == path) - showPaths.findIndex((path) => b.path == path);
 			});
 		}
+
+		this.applyCurrentQueryToDocument();
 
 	}
 

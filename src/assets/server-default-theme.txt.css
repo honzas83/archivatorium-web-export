@@ -33,6 +33,7 @@ body.theme-light {
   --background-secondary: #f6f6f6;
   --background-secondary-alt: #efefef;
   --background-modifier-border: #e0e0e0;
+	--background-modifier-border-hover: #c8c8c8;
   --background-modifier-hover: rgba(0, 0, 0, .067);
   --background-modifier-active-hover: rgba(0, 0, 0, .12);
   --text-normal: #222222;
@@ -51,6 +52,7 @@ body.theme-light {
   --icon-color-focused: #222222;
   --hr-color: #dddddd;
   --code-background: #f5f5f5;
+	--text-highlight-bg: #fff1a8;
   --code-normal: #333333;
   --blockquote-border-color: #b8b8b8;
   --callout-border-color: rgba(0, 0, 0, .15);
@@ -63,6 +65,7 @@ body.theme-dark {
   --background-secondary: #2b2c2f;
   --background-secondary-alt: #343538;
   --background-modifier-border: #45464a;
+	--background-modifier-border-hover: #5c5d62;
   --background-modifier-hover: rgba(255, 255, 255, .08);
   --background-modifier-active-hover: rgba(255, 255, 255, .15);
   --text-normal: #dcddde;
@@ -81,6 +84,7 @@ body.theme-dark {
   --icon-color-focused: #dcddde;
   --hr-color: #45464a;
   --code-background: #292a2d;
+	--text-highlight-bg: #746000;
   --code-normal: #dcddde;
   --blockquote-border-color: #66676a;
   --callout-border-color: rgba(255, 255, 255, .18);
@@ -206,6 +210,7 @@ a:hover { color: var(--text-accent-hover); text-decoration: underline; }
   color: var(--text-muted);
 }
 .markdown-rendered pre > button.copy-code-button:hover { background: var(--background-modifier-hover); color: var(--text-normal); }
+.search-mark { background: var(--text-highlight-bg); color: var(--text-normal); }
 
 .sidebar { font-family: var(--font-interface); color: var(--text-normal); background: var(--background-secondary); }
 .sidebar .leaf-content { background: var(--background-secondary); }

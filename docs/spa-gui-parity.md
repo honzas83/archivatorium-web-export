@@ -1,0 +1,27 @@
+# SPA GUI Parity Checklist
+
+Use Chrome to compare the server-rendered SPA with the archive's static export.
+Run this checklist after changes to the SPA renderer, navigation, search, or
+theme assets.
+
+- Light and dark mode toggle changes the complete interface without a reload.
+- The left tree uses source filenames without `.md` by default; setting
+  `exportOptions.fileNavigationOptions.showDocumentTitles` to `true` uses
+  document titles instead.
+- Expanding and collapsing a folder updates its chevron immediately.
+- A `tag:` search expands the complete matching hierarchy and loads every
+  matching leaf without requiring manual collapse and re-expansion.
+- A tag search and a full-text search show every matching document up to the
+  visible result limit, including lower-ranked exact matches. They highlight
+  matching content in the open document and scroll to its first match. Tag
+  links use the tag highlight treatment from the static export.
+- Direct document URLs, browser back/forward navigation, Markdown links, and
+  tag links keep the SPA loaded and update the current document.
+- A PDF link replaces the Markdown document in the center pane while both
+  sidebars remain available.
+- Metadata, Abstract, and Citing this document callouts match the static
+  export. Citation code blocks wrap, use the monospace font, and expose a
+  working copy button.
+- The right sidebar shows a hierarchical, collapsible Table of contents for
+  the open document. Its active item follows the reading position.
+- The SPA does not render or initialize the interactive graph.
