@@ -72,9 +72,13 @@ Version one with complete searchable text, [[Target]], [Loose](Loose.md), ![[Att
 		assert.equal((await bootstrapResponse.json()).navigationMode, "lazy");
 
 		const rootNavigation = await fetch(`${baseURL}/api/navigation`);
-		assert.deepEqual((await rootNavigation.json()).items.map((item) => item.path), ["Archive", "Folder", "Target.md"]);
+		const rootNavigationItems = (await rootNavigation.json()).items;
+		assert.deepEqual(rootNavigationItems.map((item) => item.path), ["Archive", "Folder", "Target.md"]);
+		assert.equal(rootNavigationItems.find((item) => item.path === "Target.md")?.name, "Target");
 		const folderNavigation = await fetch(`${baseURL}/api/navigation?parent=Folder`);
-		assert.deepEqual((await folderNavigation.json()).items.map((item) => item.exportPath), ["folder/document.html"]);
+		const folderNavigationItems = (await folderNavigation.json()).items;
+		assert.deepEqual(folderNavigationItems.map((item) => item.exportPath), ["folder/document.html"]);
+		assert.equal(folderNavigationItems[0].name, "Document");
 
 		const pageResponse = await fetch(`${baseURL}/api/page?path=folder/document.html`);
 		assert.equal(pageResponse.status, 200);
@@ -114,7 +118,9 @@ Version one with complete searchable text, [[Target]], [Loose](Loose.md), ![[Att
 			body: JSON.stringify({ query: "#Topic", type: 8, limit: 50 }),
 		});
 		assert.equal(tagResponse.status, 200);
-		assert.equal((await tagResponse.json()).items.length, 1);
+		const tagResult = await tagResponse.json();
+		assert.equal(tagResult.items.length, 1);
+		assert.equal(tagResult.items[0].navigationTitle, "Document");
 
 		const redirectResponse = await fetch(`${baseURL}/example2026`, {
 			redirect: "manual",

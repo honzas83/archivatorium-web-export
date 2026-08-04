@@ -84,7 +84,7 @@ export class Search
 			navigationItems.push({
 				sourcePath: String((result as any).sourcePath ?? ""),
 				exportPath: resultPath,
-				title: this.getResultTitle(result),
+				title: this.getResultNavigationTitle(result),
 			});
 
 			// generate matching header links to display under the search result
@@ -244,6 +244,11 @@ export class Search
 	private getResultTitle(result: any): string
 	{
 		return String(result.title ?? this.getResultWebpage(result)?.title ?? this.getResultPath(result));
+	}
+
+	private getResultNavigationTitle(result: any): string
+	{
+		return String(result.navigationTitle ?? this.getResultTitle(result));
 	}
 
 	private getResultHeaders(result: any): string[]

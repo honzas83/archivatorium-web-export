@@ -323,7 +323,12 @@ function featureOptions(exportOptions) {
 		tags: exportOptions.tagOptions ?? { enabled: true },
 		alias: exportOptions.aliasOptions ?? { enabled: true },
 		properties: exportOptions.propertiesOptions ?? { enabled: true },
-		fileNavigation: exportOptions.fileNavigationOptions ?? { enabled: true },
+		fileNavigation: {
+			...(exportOptions.fileNavigationOptions ?? {}),
+			enabled: exportOptions.fileNavigationOptions?.enabled !== false,
+			// The static exporter shows source filenames in its tree by default.
+			showDocumentTitles: exportOptions.fileNavigationOptions?.showDocumentTitles === true,
+		},
 		search: { ...(exportOptions.searchOptions ?? {}), enabled: true, serverSide: true, searchEndpoint: "/api/search" },
 		shoppingBasket: exportOptions.shoppingBasketOptions ?? { enabled: true },
 		outline: exportOptions.outlineOptions ?? { enabled: true, minCollapseDepth: 1 },

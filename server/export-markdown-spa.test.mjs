@@ -40,6 +40,7 @@ Text with [[Target]] and [Report source](Report.pdf). #Topic/Child
 		await exportMarkdownSpa({ vaultRoot: vault, exportRoot: defaultOutput });
 		const defaultMetadata = JSON.parse(await readFile(path.join(defaultOutput, "site-lib", "metadata.json"), "utf8"));
 		assert.equal(defaultMetadata.siteName, "vault");
+		assert.equal(defaultMetadata.featureOptions.fileNavigation.showDocumentTitles, false);
 
 		const firstExport = await exportMarkdownSpa({ vaultRoot: vault, exportRoot: output, configPath: config });
 		assert.equal(firstExport.writtenRecords, 3);
@@ -64,6 +65,14 @@ Text with [[Target]] and [Report source](Report.pdf). #Topic/Child
 		assert.equal((shell.match(/sidebar-collapse-icon/g) ?? []).length, 2);
 		assert.equal((shell.match(/sidebar-handle/g) ?? []).length, 2);
 		assert.equal(JSON.parse(await readFile(path.join(output, "site-lib", "metadata.json"), "utf8")).serverMetadata, true);
+
+		await writeFile(config, JSON.stringify({ exportOptions: {
+			siteName: "Fixture archive",
+			fileNavigationOptions: { showDocumentTitles: true },
+		} }));
+		await exportMarkdownSpa({ vaultRoot: vault, exportRoot: output, configPath: config });
+		const titledMetadata = JSON.parse(await readFile(path.join(output, "site-lib", "metadata.json"), "utf8"));
+		assert.equal(titledMetadata.featureOptions.fileNavigation.showDocumentTitles, true);
 
 		const unchangedExport = await exportMarkdownSpa({ vaultRoot: vault, exportRoot: output, configPath: config });
 		assert.equal(unchangedExport.writtenRecords, 0);

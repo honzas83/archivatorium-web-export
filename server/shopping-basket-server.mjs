@@ -23,7 +23,7 @@ const CORPUS_DATABASE_PATH = path.join(SEARCH_DATA_ROOT, "corpus.sqlite");
 const SEARCH_VALUE_SEPARATOR = "\u001f";
 const PAGE_CACHE_ENTRIES = Math.max(1, Number(process.env.PAGE_CACHE_ENTRIES ?? 256));
 let corpusDatabasePromise;
-let navigationSnapshotPromise;
+const navigationSnapshotPromises = new Map();
 const markdownRenderer = new MarkdownDocumentRenderer({ maxEntries: PAGE_CACHE_ENTRIES });
 const corpusStatus = {
 	state: "idle",
@@ -208,8 +208,16 @@ function normalizeNavigationParent(value) {
 	return normalized;
 }
 
-async function getNavigationSnapshot() {
-	navigationSnapshotPromise ??= (async () => {
+async function useDocumentTitlesInNavigation() {
+	const metadata = JSON.parse(await readFile(path.join(EXPORT_ROOT, "site-lib", "metadata.json"), "utf8"));
+	return metadata.featureOptions?.fileNavigation?.showDocumentTitles === true;
+}
+
+async function getNavigationSnapshot(showDocumentTitles) {
+	const cacheKey = showDocumentTitles ? "titles" : "filenames";
+	let snapshot = navigationSnapshotPromises.get(cacheKey);
+	if (!snapshot) {
+		snapshot = (async () => {
 		const database = await getCorpusDatabase();
 		const childrenByParent = new Map();
 		const rows = database.prepare(`
@@ -233,7 +241,7 @@ async function getNavigationSnapshot() {
 			}
 			addChild(parent, {
 				kind: "document",
-				name: row.title || parts.at(-1),
+				name: showDocumentTitles ? (row.title || parts.at(-1)) : path.posix.basename(parts.at(-1), path.posix.extname(parts.at(-1))),
 				path: row.source_path,
 				exportPath: row.export_path,
 				type: row.type,
@@ -242,15 +250,18 @@ async function getNavigationSnapshot() {
 			});
 		}
 		return childrenByParent;
-	})();
-	return navigationSnapshotPromise;
+		})();
+		navigationSnapshotPromises.set(cacheKey, snapshot);
+	}
+	return snapshot;
 }
 
 async function handleNavigation(request, response) {
 	try {
+		const showDocumentTitles = await useDocumentTitlesInNavigation();
 		const requestURL = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
 		const parent = normalizeNavigationParent(requestURL.searchParams.get("parent") ?? "");
-		const snapshot = await getNavigationSnapshot();
+		const snapshot = await getNavigationSnapshot(showDocumentTitles);
 		const items = Array.from(snapshot.get(parent)?.values() ?? []).sort((a, b) => {
 			if (a.kind !== b.kind) return a.kind === "folder" ? -1 : 1;
 			return (a.treeOrder ?? Number.MAX_SAFE_INTEGER) - (b.treeOrder ?? Number.MAX_SAFE_INTEGER) ||
@@ -382,10 +393,14 @@ async function handleSearch(request, response) {
 			}));
 		}
 
+		const showDocumentTitles = await useDocumentTitlesInNavigation();
 		const items = rows.slice(0, limit).map((row) => ({
 			path: row.path,
 			sourcePath: row.source_path,
 			title: row.title,
+			navigationTitle: showDocumentTitles
+				? row.title
+				: path.posix.basename(row.source_path, path.posix.extname(row.source_path)),
 			aliases: splitSearchValues(row.aliases),
 			headers: splitSearchValues(row.headers),
 			tags: splitSearchValues(row.tags),
