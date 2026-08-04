@@ -44,7 +44,9 @@ for every failed scenario and record the URL, viewport, theme, and document.
 ## Visual Regression Targets
 
 - Sidebar width, search field, file-tree indentation, chevrons, selected file,
-  buttons, and checkout controls.
+  buttons, and checkout controls. Checkout keeps the same geometry as Clear
+  while using the reference accent colors; basket items follow the file-tree
+  filename/title display setting.
 - Markdown body typography, headings, tables, tags, embeds, raw HTML, and PDF
   viewport height.
 - Theme toggle state and every component whose colors depend on it.

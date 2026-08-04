@@ -180,7 +180,16 @@ export class ShoppingBasket {
 		}
 		this.saveState();
 		this.render();
-		new Notice(`Added ${document.title} to the basket.`);
+		new Notice(`Added ${this.getItemDisplayName(item)} to the basket.`);
+	}
+
+	private getItemDisplayName(item: BasketSearchItem): string {
+		if (ObsidianSite.metadata.featureOptions.fileNavigation.showDocumentTitles === true) {
+			return item.title;
+		}
+
+		const filename = item.sourcePath.replaceAll("\\", "/").split("/").pop() ?? "";
+		return filename.replace(/\.[^/.]+$/, "") || item.title;
 	}
 
 	private getCheckoutItems(): CheckoutItem[] {
@@ -321,12 +330,13 @@ export class ShoppingBasket {
 			batchEl.appendChild(listEl);
 
 			for (const item of batch.items) {
+				const displayName = this.getItemDisplayName(item);
 				const itemEl = document.createElement("div");
 				itemEl.classList.add("shopping-basket-item");
 
 				const titleEl = document.createElement("a");
 				titleEl.classList.add("shopping-basket-item-title");
-				titleEl.innerText = item.title;
+				titleEl.innerText = displayName;
 				titleEl.title = item.sourcePath;
 				titleEl.href = this.getItemLink(item);
 				titleEl.addEventListener("click", (event) => event.stopPropagation());
@@ -335,7 +345,7 @@ export class ShoppingBasket {
 				const removeItemButtonEl = document.createElement("button");
 				removeItemButtonEl.type = "button";
 				removeItemButtonEl.classList.add("shopping-basket-remove-item");
-				removeItemButtonEl.setAttribute("aria-label", `Remove ${item.title}`);
+				removeItemButtonEl.setAttribute("aria-label", `Remove ${displayName}`);
 				removeItemButtonEl.innerText = "x";
 				removeItemButtonEl.addEventListener("click", () =>
 					this.removeItem(batch.id, item.sourcePath)

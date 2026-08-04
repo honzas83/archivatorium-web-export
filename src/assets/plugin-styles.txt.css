@@ -895,10 +895,15 @@ input[type=search] {
 	color: var(--text-faint);
 }
 
-.shopping-basket-checkout {
+button.mod-cta.shopping-basket-checkout {
 	flex: 1 1 auto;
-	background: var(--interactive-accent);
+	border-color: var(--shopping-basket-checkout-border, #8167d2);
+	background: var(--shopping-basket-checkout, #9375ef);
 	color: var(--text-on-accent);
+}
+
+button.mod-cta.shopping-basket-checkout:hover:not(:disabled) {
+	background: var(--shopping-basket-checkout-hover, #8766e0);
 }
 
 .shopping-basket-clear {

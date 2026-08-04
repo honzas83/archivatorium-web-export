@@ -11,6 +11,7 @@ export class FileNavigationOptions extends FetchedFeatureOptions
 	defaultFileIcon: string = "lucide//file";
 	defaultMediaIcon: string = "lucide//file-image";
 	exposeStartingPath: boolean = true;
+	showDocumentTitles: boolean = false;
 	
 	info_showCustomIcons: FeatureSettingInfo = new FeatureSettingInfo(
 	{
