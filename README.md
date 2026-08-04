@@ -60,11 +60,12 @@ of documents practical.
 
 ## Requirements
 
-- Node.js 24
+- Node.js 26 (recommended) or Node.js 24
 - Obsidian desktop when using the plugin workflow
 - A writable vault during generation and indexing
 
-Node 25 is not supported by the current dependency and build toolchain.
+Node 25 is not supported by the current dependency and build toolchain. The
+tested package range is `>=24 <25 || >=26 <27`.
 
 ## Installation
 
@@ -265,7 +266,7 @@ modules or SQLite database through the static file handler.
 
 ## Development
 
-Use Node.js 24:
+Use Node.js 26 (or the supported Node.js 24 release):
 
 ```bash
 npm install
