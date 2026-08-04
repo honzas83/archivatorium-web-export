@@ -94,6 +94,10 @@ Version one with complete searchable text, [[Target]], [Loose](Loose.md), ![[Att
 		assert.equal(attachmentResponse.status, 200);
 		assert.equal(await attachmentResponse.text(), "PDF fixture");
 
+		const attachmentPageResponse = await fetch(`${baseURL}/api/page?path=attachments/report.pdf`);
+		assert.equal(attachmentPageResponse.status, 200);
+		assert.match((await attachmentPageResponse.json()).html, /class="document-pdf-embed"/);
+
 		const shellResponse = await fetch(`${baseURL}/folder/document.html`);
 		assert.equal(shellResponse.status, 200);
 		assert.match(await shellResponse.text(), /webpage.js/);

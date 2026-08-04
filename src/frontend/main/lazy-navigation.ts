@@ -13,24 +13,47 @@ interface NavigationResponse {
 	items: NavigationItem[];
 }
 
+interface SearchNavigationItem {
+	sourcePath: string;
+	exportPath: string;
+	title: string;
+}
+
+interface SearchFolder {
+	name: string;
+	path: string;
+	folders: Map<string, SearchFolder>;
+	documents: SearchNavigationItem[];
+}
+
 /** Server-backed file tree that fetches each folder only once per page session. */
 export class LazyNavigation {
-	public readonly tree: Tree;
+	public tree: Tree;
+	public onTreeChanged: ((tree: Tree) => void) | undefined;
+	private readonly container: HTMLElement;
+	private readonly title: string;
 	private readonly loadedParents = new Set<string>();
 	private readonly loadingParents = new Map<string, Promise<void>>();
+	private filtering = false;
 
 	constructor(container: HTMLElement, title: string) {
-		container.replaceChildren();
+		this.container = container;
+		this.title = title;
+		this.buildTree();
+	}
+
+	private buildTree(): void {
+		this.container.replaceChildren();
 		const treeContainer = document.createElement("div");
 		treeContainer.classList.add("tree-container", "nav-files-container");
-		container.appendChild(treeContainer);
+		this.container.appendChild(treeContainer);
 
 		const header = document.createElement("div");
 		header.classList.add("feature-header");
 		treeContainer.appendChild(header);
 		const titleEl = document.createElement("div");
 		titleEl.classList.add("feature-title");
-		titleEl.textContent = title;
+		titleEl.textContent = this.title;
 		header.appendChild(titleEl);
 		const collapseAll = document.createElement("button");
 		collapseAll.classList.add("clickable-icon", "nav-action-button", "tree-collapse-all", "is-collapsed");
@@ -39,6 +62,7 @@ export class LazyNavigation {
 		header.appendChild(collapseAll);
 
 		this.tree = new Tree(treeContainer);
+		this.onTreeChanged?.(this.tree);
 	}
 
 	public async initialize(): Promise<void> {
@@ -46,6 +70,10 @@ export class LazyNavigation {
 	}
 
 	public async revealDocument(sourcePath: string, exportPath: string): Promise<void> {
+		if (this.filtering) {
+			this.tree.findByPath(exportPath)?.setActive();
+			return;
+		}
 		const parts = sourcePath.replaceAll("\\", "/").split("/").filter(Boolean);
 		let parent: TreeItem = this.tree;
 		let parentPath = "";
@@ -63,6 +91,53 @@ export class LazyNavigation {
 			document.setActive();
 			document.parent && (document.parent.collapsed = false);
 		}
+	}
+
+	public async filter(items: SearchNavigationItem[]): Promise<void> {
+		this.filtering = true;
+		this.loadedParents.clear();
+		this.buildTree();
+
+		const root: SearchFolder = { name: "", path: "", folders: new Map(), documents: [] };
+		const seen = new Set<string>();
+		for (const item of items) {
+			if (!item.sourcePath || !item.exportPath || seen.has(item.exportPath)) continue;
+			seen.add(item.exportPath);
+			const parts = item.sourcePath.replaceAll("\\", "/").split("/").filter(Boolean);
+			let folder = root;
+			let folderPath = "";
+			for (const part of parts.slice(0, -1)) {
+				folderPath = folderPath ? `${folderPath}/${part}` : part;
+				let child = folder.folders.get(part);
+				if (!child) {
+					child = { name: part, path: folderPath, folders: new Map(), documents: [] };
+					folder.folders.set(part, child);
+				}
+				folder = child;
+			}
+			folder.documents.push(item);
+		}
+
+		const appendFolder = (parent: TreeItem, folder: SearchFolder) => {
+			for (const child of Array.from(folder.folders.values()).sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" }))) {
+				const item = this.tree.appendItem(parent, this.createItemElement({ kind: "folder", name: child.name, path: child.path, hasChildren: true }, parent.depth + 1));
+				item.path = child.path;
+				item.collapsed = false;
+				appendFolder(item, child);
+			}
+			for (const document of folder.documents) {
+				this.tree.appendItem(parent, this.createItemElement({ kind: "document", name: document.title, path: document.sourcePath, exportPath: document.exportPath, hasChildren: false }, parent.depth + 1));
+			}
+		};
+		appendFolder(this.tree, root);
+	}
+
+	public async clearFilter(): Promise<void> {
+		if (!this.filtering) return;
+		this.filtering = false;
+		this.loadedParents.clear();
+		this.buildTree();
+		await this.initialize();
 	}
 
 	private async loadChildren(parent: TreeItem, parentPath: string): Promise<void> {

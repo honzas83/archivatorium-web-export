@@ -128,6 +128,7 @@ export class ObsidianWebsite {
 
 		if (fileTreeEl && this.metadata.navigationMode === "lazy") {
 			this.lazyNavigation = new LazyNavigation(fileTreeEl, this.metadata.siteName ?? "Files");
+			this.lazyNavigation.onTreeChanged = (tree) => this.fileTree = tree;
 			await this.lazyNavigation.initialize();
 			this.fileTree = this.lazyNavigation.tree;
 		} else if (fileTreeEl) this.fileTree = new Tree(fileTreeEl);

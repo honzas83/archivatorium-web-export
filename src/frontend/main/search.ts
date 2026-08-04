@@ -41,10 +41,6 @@ export class Search
 	private static readonly inlineMarkClass = "search-mark";
 	private static readonly tagMarkClass = "search-tag-mark";
 
-	// only used when the file tree is not present
-	private dedicatedSearchResultsList: HTMLElement;
-	
-
 	public async search(query: string, type: SearchType = allSearch)
 	{
 		if (query.length == 0)
@@ -65,25 +61,31 @@ export class Search
 		}
 
 		const requestId = ++this.searchRequestId;
-		let results = await this.runSearchQuery(query, type, 200);
+		let results = await this.runSearchQuery(query, type, type === SearchType.Tags ? 5000 : 200);
 		if (requestId !== this.searchRequestId) return;
 
 		// clamp results to at most the top 50
-		if (results.length > 50) results.splice(50);
+		if (type !== SearchType.Tags && results.length > 50) results.splice(50);
 		
 		// filter results for the best matches and generate extra metadata
 		const showPaths: string[] = [];
 		const headerLinks: Map<string, string[]> = new Map();
+		const navigationItems: Array<{ sourcePath: string, exportPath: string, title: string }> = [];
 		for (const result of results)
 		{
 			const resultPath = this.getResultPath(result);
 			if (!resultPath) continue;
 
 			// only show the most relevant results
-			if ((result.score < results[0].score * 0.30 && showPaths.length > 4) || result.score < results[0].score * 0.1) 
+			if (type !== SearchType.Tags && ((result.score < results[0].score * 0.30 && showPaths.length > 4) || result.score < results[0].score * 0.1))
 				break;
 
 			showPaths.push(resultPath);
+			navigationItems.push({
+				sourcePath: String((result as any).sourcePath ?? ""),
+				exportPath: resultPath,
+				title: this.getResultTitle(result),
+			});
 
 			// generate matching header links to display under the search result
 			if(query.length > 2)
@@ -115,7 +117,11 @@ export class Search
 			}
 		}
 
-		if (!ObsidianSite.lazyNavigation)
+		if (ObsidianSite.lazyNavigation)
+		{
+			await ObsidianSite.lazyNavigation.filter(navigationItems);
+		}
+		else
 		{
 			ObsidianSite.fileTree?.filter(showPaths);
 			ObsidianSite.fileTree?.setSubHeadings(headerLinks);
@@ -126,31 +132,6 @@ export class Search
 			});
 		}
 
-		if (!ObsidianSite.fileTree || ObsidianSite.lazyNavigation)
-		{
-			const list = document.createElement('div');
-			results.filter((result: any) => this.getResultPath(result).endsWith(".html"))
-					.slice(0, 20).forEach((result: any) => 
-					{
-						const resultPath = this.getResultPath(result);
-						const item = document.createElement('div');
-						item.classList.add('search-result');
-
-						const link = document.createElement('a');
-						link.classList.add('tree-item-self');
-
-						const searchURL = resultPath + '?mark=' + encodeURIComponent(query);
-						link.setAttribute('href', searchURL);
-						link.appendChild(document.createTextNode(this.getResultTitle(result)));
-						item.appendChild(link);
-						list.append(item);
-					});
-
-			this.dedicatedSearchResultsList.replaceChildren(list);
-			this.dedicatedSearchResultsList.hidden = false;
-			LinkHandler.initializeLinks(this.dedicatedSearchResultsList);
-		}
-	
 	}
 
 	private filterTagResults(results: Array<SearchResult>, query: string): Array<SearchResult>
@@ -299,18 +280,16 @@ export class Search
 
 	public clear()
 	{
-		if (this.dedicatedSearchResultsList)
-		{
-			this.dedicatedSearchResultsList.replaceChildren();
-			this.dedicatedSearchResultsList.hidden = true;
-		}
 		this.searchRequestId++;
 		this.container?.classList.remove("has-content");
 		this.input.value = "";
 		this.clearCurrentDocumentSearch();
-		ObsidianSite.fileTree?.unfilter();
-		ObsidianSite.fileTree?.removeSubHeadings();
-		ObsidianSite.fileTree?.unsort();
+		if (ObsidianSite.lazyNavigation) void ObsidianSite.lazyNavigation.clearFilter();
+		else {
+			ObsidianSite.fileTree?.unfilter();
+			ObsidianSite.fileTree?.removeSubHeadings();
+			ObsidianSite.fileTree?.unsort();
+		}
 	}
 
 	public async init(): Promise<Search | undefined>
@@ -369,14 +348,6 @@ export class Search
 				console.error("Search failed:", error);
 			}
 		});
-
-		if (!ObsidianSite.fileTree || ObsidianSite.lazyNavigation)
-		{
-			this.dedicatedSearchResultsList = document.createElement('div');
-			this.dedicatedSearchResultsList.setAttribute('id', 'search-results');
-			this.dedicatedSearchResultsList.hidden = true;
-			document.getElementById('file-explorer')?.before(this.dedicatedSearchResultsList);
-		}
 
 		return this;
 	}

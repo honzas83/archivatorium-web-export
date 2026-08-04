@@ -73,6 +73,23 @@ function sendJSON(response, statusCode, value) {
 	});
 }
 
+function escapeHTML(value) {
+	return String(value)
+		.replaceAll("&", "&amp;")
+		.replaceAll("<", "&lt;")
+		.replaceAll(">", "&gt;")
+		.replaceAll('"', "&quot;");
+}
+
+function renderAttachmentDocument(data) {
+	const title = path.posix.basename(data.sourcePath ?? data.exportPath ?? "Attachment");
+	const source = `/${encodeURI(data.exportPath)}`;
+	if (String(data.exportPath).toLowerCase().endsWith(".pdf")) {
+		return `<div class="obsidian-document markdown-preview-view markdown-rendered is-readable-line-width" data-type="attachment"><div class="markdown-preview-sizer markdown-preview-section"><div class="header"><h1 class="page-title heading inline-title">${escapeHTML(title)}</h1><div class="data-bar"></div></div><iframe class="document-pdf-embed" src="${escapeHTML(source)}" title="${escapeHTML(title)}"></iframe></div></div>`;
+	}
+	return `<div class="obsidian-document markdown-preview-view markdown-rendered is-readable-line-width" data-type="attachment"><div class="markdown-preview-sizer markdown-preview-section"><div class="header"><h1 class="page-title heading inline-title">${escapeHTML(title)}</h1><div class="data-bar"></div></div><p><a href="${escapeHTML(source)}">${escapeHTML(title)}</a></p></div></div>`;
+}
+
 function tokenizeSearchQuery(query) {
 	const terms = String(query).toLowerCase().match(/[\p{L}\p{N}_]+/gu) ?? [];
 	return terms.map((term) => `"${term.replaceAll('"', '""')}"*`).join(" AND ");
@@ -286,6 +303,10 @@ async function handlePage(request, response) {
 				: undefined);
 		if (!row) throw Object.assign(new Error("Document not found."), { statusCode: 404 });
 		const data = JSON.parse(row.data);
+		if (row.kind === "file" && data.type === "attachment") {
+			sendJSON(response, 200, { data, html: renderAttachmentDocument(data) });
+			return;
+		}
 		if (row.kind !== "webpage" || data.type !== "markdown") {
 			throw Object.assign(new Error("Only Markdown documents can be rendered dynamically."), { statusCode: 415 });
 		}

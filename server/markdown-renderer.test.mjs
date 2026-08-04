@@ -25,6 +25,9 @@ title: Hidden frontmatter
 > [!citing this document]
 > Citation content
 
+> [!warning]- Folded warning
+> Hidden until expanded.
+
 \`\`\`bibtex
 @misc{report}
 \`\`\`
@@ -51,13 +54,15 @@ title: Hidden frontmatter
 	assert.match(first, /<a class="internal-link" href="target.html">Linked target<\/a>/);
 	assert.match(first, /<a class="internal-link" href="target.html">Markdown target<\/a>/);
 	assert.match(first, /<a class="internal-link" href="target.html">Punctuated target<\/a>/);
-	assert.match(first, /<a href="\/assets\/report.pdf">PDF link<\/a>/);
+	assert.match(first, /<a class="internal-link attachment-link" href="assets\/report.pdf">PDF link<\/a>/);
 	assert.match(first, /<a class="tag" href="\/\?query=tag:Entities%2FOrg%2FNATO">Legacy tag<\/a>/);
 	assert.match(first, /<img class="internal-embed" src="\/assets\/map.png" alt="Map.png">/);
 	assert.match(first, /<iframe class="internal-embed" src="\/assets\/report.pdf" title="Report.pdf"><\/iframe>/);
 	assert.match(first, /<table>/);
 	assert.match(first, /data-callout="info"/);
 	assert.match(first, /data-callout="citingthisdocument"/);
+	assert.match(first, /data-callout="warning" data-callout-fold="-"/);
+	assert.match(first, /class="callout-icon"/);
 	assert.match(first, /class="trusted"/);
 	assert.match(first, /@misc\{report\}/);
 	assert.doesNotMatch(first, /Hidden frontmatter/);

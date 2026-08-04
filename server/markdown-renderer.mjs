@@ -22,18 +22,30 @@ function slugify(value) {
 		.replace(/[\s_]+/g, "-") || "section";
 }
 
+function calloutIcon(type) {
+	const paths = {
+		warning: "M10.3 2.9 1.8 17a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 2.9a2 2 0 0 0-3.4 0ZM12 9v4m0 4h.01",
+		danger: "M10.3 2.9 1.8 17a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 2.9a2 2 0 0 0-3.4 0ZM12 9v4m0 4h.01",
+		error: "M10.3 2.9 1.8 17a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 2.9a2 2 0 0 0-3.4 0ZM12 9v4m0 4h.01",
+		question: "M9.1 9a3 3 0 1 1 5.8 1c-.9 1.1-2.9 1.5-2.9 3.5m.01 3.5h.01M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z",
+		quote: "M10 8H6a2 2 0 0 0-2 2v4a2 2 0 0 0 2 2h2l2-4V8Zm10 0h-4a2 2 0 0 0-2 2v4a2 2 0 0 0 2 2h2l2-4V8Z",
+	};
+	const path = paths[type] ?? "M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Zm0-11v5m0-9h.01";
+	return `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="svg-icon"><path d="${path}"/></svg>`;
+}
+
 function splitCallouts(markdown, renderContent) {
 	const lines = markdown.split(/\r?\n/);
 	const output = [];
 	for (let index = 0; index < lines.length;) {
-		const match = lines[index].match(/^>\s*\[!([^\]]+)[+-]?\]\s*(.*)$/i);
+		const match = lines[index].match(/^>\s*\[!(.+?)\]([+-])?\s*(.*)$/i);
 		if (!match) {
 			output.push(lines[index]);
 			index++;
 			continue;
 		}
 
-		const [, rawType, rawTitle] = match;
+		const [, rawType, fold, rawTitle] = match;
 		const body = [];
 		index++;
 		while (index < lines.length) {
@@ -50,9 +62,12 @@ function splitCallouts(markdown, renderContent) {
 
 		const type = rawType.trim().toLowerCase().replace(/[^a-z0-9_-]/g, "") || "note";
 		const title = rawTitle.trim() || rawType.trim();
+		const foldMarkup = fold
+			? `<div class="callout-fold${fold === "-" ? " is-collapsed" : ""}"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="svg-icon"><path d="m9 18 6-6-6-6"/></svg></div>`
+			: "";
 		output.push(
-			`<div class="callout" data-callout="${escapeAttribute(type)}">`,
-			`<div class="callout-title"><div class="callout-title-inner">${escapeAttribute(title)}</div></div>`,
+			`<div class="callout${fold === "-" ? " is-collapsed" : ""}" data-callout="${escapeAttribute(type)}"${fold ? ` data-callout-fold="${fold}"` : ""}>`,
+			`<div class="callout-title"><div class="callout-icon">${calloutIcon(type)}</div><div class="callout-title-inner">${escapeAttribute(title)}</div>${foldMarkup}</div>`,
 			`<div class="callout-content">${renderContent(body.join("\n"))}</div>`,
 			"</div>",
 		);
@@ -139,6 +154,9 @@ export class MarkdownDocumentRenderer {
 				return `<a class="internal-link internal-embed" href="${escapeAttribute(href)}">${escapeAttribute(label)}</a>`;
 			}
 			if (!resolved.sourcePath.toLowerCase().endsWith(".md")) {
+				if (resolved.sourcePath.toLowerCase().endsWith(".pdf")) {
+					return `<a class="internal-link attachment-link" href="${escapeAttribute(href)}">${escapeAttribute(label)}</a>`;
+				}
 				return `<a href="/${escapeAttribute(href)}">${escapeAttribute(label)}</a>`;
 			}
 			return `<a class="internal-link" href="${escapeAttribute(href)}">${escapeAttribute(label)}</a>`;
@@ -161,6 +179,9 @@ export class MarkdownDocumentRenderer {
 				return `<a class="internal-link internal-embed" href="${escapeAttribute(href)}">${escapeAttribute(label)}</a>`;
 			}
 			if (!resolved.sourcePath.toLowerCase().endsWith(".md")) {
+				if (resolved.sourcePath.toLowerCase().endsWith(".pdf")) {
+					return `<a class="internal-link attachment-link" href="${escapeAttribute(href)}">${escapeAttribute(label)}</a>`;
+				}
 				return `<a href="/${escapeAttribute(href)}">${escapeAttribute(label)}</a>`;
 			}
 			return `<a class="internal-link" href="${escapeAttribute(href)}">${escapeAttribute(label)}</a>`;
