@@ -209,12 +209,29 @@ export class Website
 		const exportMediaDirectly =
 			!this.exportOptions.combineAsSingleFile &&
 			(useLargeVaultMode || this.exportOptions.searchOptions.serverSide);
+		const directMarkdownCorpus = this.exportOptions.searchOptions.serverSide;
 		for (const file of this.sourceFiles)
 		{
 			try
 			{
 				const isConvertable = MarkdownRendererAPI.isConvertable(file.extension);
 				const isViewableMedia = MarkdownRendererAPI.viewableMediaExtensions.contains(file.extension);
+				if (directMarkdownCorpus)
+				{
+					if (file.extension.toLowerCase() === "md")
+					{
+						this.webpageSourceFiles.push(file);
+					}
+					else
+					{
+						const attachment = Attachment.fromSource(
+							this.getTargetPathForFile(file), file, this.exportOptions
+						);
+						await attachment.download();
+						await this.index.recordDirectAttachment(attachment);
+					}
+					continue;
+				}
 
 				// Make sure files which need to be saved directly without conversion are added to the index as attachments
 				if (!isConvertable || isViewableMedia)

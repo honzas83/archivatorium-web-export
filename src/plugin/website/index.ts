@@ -720,6 +720,28 @@ export class Index
 		}
 	}
 
+	/**
+	 * Server-rendered exports keep attachment metadata only in the on-disk
+	 * corpus. Retaining tens of thousands of Attachment instances is needless.
+	 */
+	public async recordDirectAttachment(attachment: Attachment): Promise<void>
+	{
+		if (!attachment.sourcePath) return;
+		const data: FileData = {
+			createdTime: attachment.sourceStat.ctime,
+			modifiedTime: attachment.sourceStat.mtime,
+			sourceSize: attachment.sourceStat.size,
+			sourcePath: attachment.sourcePath,
+			exportPath: attachment.targetPath.path,
+			showInTree: false,
+			treeOrder: 0,
+			backlinks: [],
+			type: "attachment",
+			data: null,
+		};
+		await this.serverCorpus.write({ kind: "file", data });
+	}
+
 	public async removeFile(file: Attachment | Webpage)
 	{
 		if (file instanceof Webpage)
