@@ -67,8 +67,10 @@ title: Hidden frontmatter
 	assert.match(first, /data-callout="info"/);
 	assert.match(first, /data-callout="citingthisdocument"/);
 	assert.match(first, /callout-title-inner">Citing this document<\/div>/);
+	assert.match(first, /svg-icon lucide-pencil/);
 	assert.match(first, /data-callout="abstract"/);
 	assert.match(first, /callout-title-inner">Abstract<\/div>/);
+	assert.match(first, /svg-icon lucide-clipboard-list/);
 	assert.match(first, /<h1 id="abstract-heading">Abstract heading<\/h1>/);
 	assert.match(first, /data-callout="warning" data-callout-fold="-"/);
 	assert.match(first, /class="callout-icon"/);
