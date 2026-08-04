@@ -393,7 +393,10 @@ async function handlePage(request, response) {
 		const exportPath = requestURL.searchParams.get("path")?.replace(/^\/+/, "");
 		if (!exportPath) throw Object.assign(new Error("A document path is required."), { statusCode: 400 });
 		const database = await getCorpusDatabase();
-		const row = database.prepare("SELECT kind, data FROM metadata_documents WHERE export_path = ?").get(exportPath);
+		const row = database.prepare("SELECT kind, data FROM metadata_documents WHERE export_path = ?").get(exportPath) ??
+			(exportPath === "index.html"
+				? database.prepare("SELECT kind, data FROM metadata_documents WHERE kind = 'webpage' AND type = 'markdown' ORDER BY tree_order, export_path LIMIT 1").get()
+				: undefined);
 		if (!row) throw Object.assign(new Error("Document not found."), { statusCode: 404 });
 		const data = JSON.parse(row.data);
 		if (row.kind !== "webpage" || data.type !== "markdown") {

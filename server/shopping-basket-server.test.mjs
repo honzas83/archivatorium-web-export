@@ -161,6 +161,9 @@ Version one with [[Target]], ![[Attachments/Report.pdf]] and #Topic/Child.
 		assert.match(page.html, /src="\/attachments\/report.pdf"/);
 		assert.match(page.html, /data-callout="info"/);
 
+		const rootPageResponse = await fetch(`${baseURL}/api/page?path=index.html`);
+		assert.equal((await rootPageResponse.json()).data.sourcePath, "Folder/Document.md");
+
 		const attachmentResponse = await fetch(`${baseURL}/attachments/report.pdf`);
 		assert.equal(attachmentResponse.status, 200);
 		assert.equal(await attachmentResponse.text(), "PDF fixture");

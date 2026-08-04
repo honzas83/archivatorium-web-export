@@ -96,6 +96,7 @@ function getSearchText(markdown: string, tags: string[]): string {
 	let text = withoutExcludedCallouts(markdown.replace(FRONTMATTER_PATTERN, ""));
 	text = text.replace(/<style[\s\S]*?<\/style>|<script[\s\S]*?<\/script>/gi, " ");
 	text = text.replace(/<[^>]+>/g, " ");
+	text = text.replace(/(^|[\s(])#[\p{L}\p{N}_/-]+/gu, "$1");
 	text = text.replace(WIKILINK_PATTERN, (_match, _embed, target, label) => label?.trim() || target);
 	text = text.replace(/!?(\[[^\]]*\])\([^)]*\)/g, "$1");
 	text = text.replace(/[`*_~>#|]/g, " ");
