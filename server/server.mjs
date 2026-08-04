@@ -112,12 +112,30 @@ function splitSearchValues(value) {
 
 async function initializeCorpusDatabase() {
 	corpusStatus.state = "opening";
+	let databaseExists = false;
+	let databaseMode;
 	try {
 		if (!(await stat(CORPUS_DATABASE_PATH)).isFile()) throw new Error(`Corpus path is not a file: ${CORPUS_DATABASE_PATH}`);
+		databaseExists = true;
 	} catch (error) {
 		if (error?.code !== "ENOENT") throw error;
+	}
+	if (databaseExists) {
+		const existingDatabase = new DatabaseSync(CORPUS_DATABASE_PATH);
+		try {
+			databaseMode = existingDatabase.prepare("SELECT value FROM export_state WHERE key = 'mode'").get()?.value;
+		} catch {
+			databaseMode = undefined;
+		} finally {
+			existingDatabase.close();
+		}
+	}
+	if (databaseMode !== "direct-markdown-spa") {
 		corpusStatus.state = "indexing";
-		console.log(`[companion-sqlite] database missing; indexing vault into ${CORPUS_DATABASE_PATH}`);
+		console.log(databaseExists
+			? `[companion-sqlite] database is incomplete; resuming vault index in ${CORPUS_DATABASE_PATH}`
+			: `[companion-sqlite] database missing; indexing vault into ${CORPUS_DATABASE_PATH}`
+		);
 		await exportMarkdownSpa({ vaultRoot: VAULT_ROOT, writeApplication: false });
 	}
 	const database = new DatabaseSync(CORPUS_DATABASE_PATH);

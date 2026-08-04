@@ -4,9 +4,10 @@ import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { DatabaseSync } from "node:sqlite";
 import { exportMarkdownSpa } from "./export-markdown-spa.mjs";
 
-test("server indexes a vault with a missing SQLite database and keeps server data private", async () => {
+test("server resumes an incomplete SQLite database and keeps server data private", async () => {
 	const testRoot = await mkdtemp(path.join(tmpdir(), "obsidian-export-search-"));
 	const vaultRoot = path.join(testRoot, "vault");
 	const serverRoot = path.join(vaultRoot, ".archivatorium");
@@ -32,11 +33,11 @@ Version one with complete searchable text, [[Target]], [Loose](Loose.md), ![[Att
 	const configPath = path.join(vaultRoot, ".obsidian", "plugins", "archivatorium-web-export", "data.json");
 	await writeFile(configPath, JSON.stringify({ exportOptions: { siteName: "Test archive" } }));
 	await exportMarkdownSpa({ vaultRoot, configPath });
-	await rm(path.join(serverRoot, ".server-data", "corpus.sqlite"), { force: true });
-	await rm(path.join(serverRoot, ".server-data", "corpus.sqlite-wal"), { force: true });
-	await rm(path.join(serverRoot, ".server-data", "corpus.sqlite-shm"), { force: true });
+	const incompleteDatabase = new DatabaseSync(path.join(serverRoot, ".server-data", "corpus.sqlite"));
+	incompleteDatabase.exec("DELETE FROM export_state");
+	incompleteDatabase.close();
 	await writeFile(path.join(serverRoot, ".export-files.log"), "private progress");
-	await assert.rejects(stat(path.join(serverRoot, ".server-data", "corpus.sqlite")));
+	assert.equal((await stat(path.join(serverRoot, ".server-data", "corpus.sqlite"))).isFile(), true);
 	await assert.rejects(stat(path.join(serverRoot, "site-lib", "corpus")));
 
 	process.env.VAULT_ROOT = vaultRoot;
