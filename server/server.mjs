@@ -6,7 +6,7 @@ import { readFile, readdir, stat } from "node:fs/promises";
 import { DatabaseSync } from "node:sqlite";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { exportMarkdownSpa, writeMarkdownSpaApplication } from "./export-markdown-spa.mjs";
+import { exportMarkdownSpa, getMarkdownSpaApplicationVersion, writeMarkdownSpaApplication } from "./export-markdown-spa.mjs";
 import { MarkdownDocumentRenderer } from "./markdown-renderer.mjs";
 import { resolveCorpusDatabasePath, resolveServerRoot, resolveVaultRoot } from "./vault-layout.mjs";
 
@@ -134,12 +134,14 @@ async function loadBootstrapMetadata() {
 	return JSON.parse(await readFile(path.join(SERVER_ROOT, "site-lib", "metadata.json"), "utf8"));
 }
 
-async function hasGeneratedApplication() {
+async function getGeneratedApplicationStatus() {
 	try {
 		const files = await Promise.all(APPLICATION_FILES.map((file) => stat(path.join(SERVER_ROOT, file))));
-		return files.every((file) => file.isFile());
+		if (!files.every((file) => file.isFile())) return { complete: false };
+		const metadata = JSON.parse(await readFile(path.join(SERVER_ROOT, "site-lib", "metadata.json"), "utf8"));
+		return { complete: true, version: metadata.applicationVersion };
 	} catch (error) {
-		if (error?.code === "ENOENT") return false;
+		if (error?.code === "ENOENT" || error instanceof SyntaxError) return { complete: false };
 		throw error;
 	}
 }
@@ -164,7 +166,8 @@ async function initializeCorpusDatabase() {
 			existingDatabase.close();
 		}
 	}
-	const applicationExists = await hasGeneratedApplication();
+	const applicationStatus = await getGeneratedApplicationStatus();
+	const currentApplicationVersion = await getMarkdownSpaApplicationVersion();
 	if (databaseMode !== "direct-markdown-spa") {
 		corpusStatus.state = "indexing";
 		console.log(databaseExists
@@ -173,8 +176,11 @@ async function initializeCorpusDatabase() {
 		);
 		await exportMarkdownSpa({ vaultRoot: VAULT_ROOT, writeApplication: false });
 	}
-	if (!applicationExists) {
+	if (!applicationStatus.complete) {
 		console.log(`[companion-app] generated application is incomplete; rebuilding ${SERVER_ROOT}`);
+		await writeMarkdownSpaApplication({ vaultRoot: VAULT_ROOT });
+	} else if (currentApplicationVersion && applicationStatus.version !== currentApplicationVersion) {
+		console.log(`[companion-app] repository application is newer; updating ${SERVER_ROOT}`);
 		await writeMarkdownSpaApplication({ vaultRoot: VAULT_ROOT });
 	}
 	const database = new DatabaseSync(CORPUS_DATABASE_PATH);

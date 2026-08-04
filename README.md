@@ -190,6 +190,11 @@ indexes the vault before opening the listening port. Later page rendering uses
 the source Markdown directly and validates its cache by source `mtime` and
 size.
 
+When the server is started from the repository, it also compares the current
+SPA application fingerprint with the copy stored in the vault. Newer frontend
+sources are bundled automatically and an outdated `.archivatorium` application
+is refreshed without rebuilding `corpus.sqlite`.
+
 Run it with Node.js 24:
 
 ```bash

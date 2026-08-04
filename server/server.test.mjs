@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { once } from "node:events";
-import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -38,6 +38,10 @@ Version one with complete searchable text, [[Target]], [Loose](Loose.md), ![[Att
 		},
 	}));
 	await exportMarkdownSpa({ vaultRoot, configPath });
+	const generatedMetadataPath = path.join(serverRoot, "site-lib", "metadata.json");
+	const staleMetadata = JSON.parse(await readFile(generatedMetadataPath, "utf8"));
+	staleMetadata.applicationVersion = "stale-application";
+	await writeFile(generatedMetadataPath, JSON.stringify(staleMetadata));
 	const incompleteDatabase = new DatabaseSync(path.join(serverRoot, "corpus.sqlite"));
 	incompleteDatabase.exec("DELETE FROM export_state");
 	incompleteDatabase.close();
@@ -117,6 +121,7 @@ Version one with complete searchable text, [[Target]], [Loose](Loose.md), ![[Att
 		assert.equal(bootstrapResponse.status, 200);
 		const bootstrap = await bootstrapResponse.json();
 		assert.equal(bootstrap.navigationMode, "lazy");
+		assert.notEqual(bootstrap.applicationVersion, "stale-application");
 		assert.equal(bootstrap.tagTree.find((item) => item.path === "Topic")?.hasChildren, true);
 		assert.deepEqual(bootstrap.tagTree.find((item) => item.path === "Topic")?.children, []);
 		const tagChildrenResponse = await fetch(`${baseURL}/api/tags?parent=Topic`);
