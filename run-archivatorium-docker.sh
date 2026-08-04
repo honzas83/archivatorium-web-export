@@ -8,7 +8,7 @@ IMAGE_NAME="${EXPORT_IMAGE:-archivatorium-web-export:local}"
 CONTAINER_NAME="${EXPORT_CONTAINER_NAME:-archivatorium-web-export}"
 EXPORT_MEMORY="${EXPORT_MEMORY:-12g}"
 EXPORT_MEMORY_SWAP="${EXPORT_MEMORY_SWAP:-16g}"
-EXPORT_RESTART_AFTER_RENDERED_FILES="${EXPORT_RESTART_AFTER_RENDERED_FILES:-1000}"
+EXPORT_RESTART_AFTER_RENDERED_MB="${EXPORT_RESTART_AFTER_RENDERED_MB:-10}"
 
 VAULT_PATH="${1:-${EXPORT_VAULT:-}}"
 OUTPUT_PATH="${2:-${EXPORT_OUTPUT:-${VAULT_PATH:+${VAULT_PATH}.html}}}"
@@ -46,8 +46,8 @@ if [[ ! -f "$CONFIG_PATH" ]]; then
   exit 1
 fi
 
-if ! [[ "$EXPORT_RESTART_AFTER_RENDERED_FILES" =~ ^[0-9]+$ ]]; then
-  echo "EXPORT_RESTART_AFTER_RENDERED_FILES must be a non-negative integer." >&2
+if ! [[ "$EXPORT_RESTART_AFTER_RENDERED_MB" =~ ^[0-9]+$ ]]; then
+  echo "EXPORT_RESTART_AFTER_RENDERED_MB must be a non-negative integer." >&2
   exit 2
 fi
 
@@ -83,7 +83,7 @@ docker_args=(
   --memory "$EXPORT_MEMORY"
   --memory-swap "$EXPORT_MEMORY_SWAP"
   --env EXPORT_ENTIRE_VAULT=1
-  --env "EXPORT_RESTART_AFTER_RENDERED_FILES=$EXPORT_RESTART_AFTER_RENDERED_FILES"
+  --env "EXPORT_RESTART_AFTER_RENDERED_MB=$EXPORT_RESTART_AFTER_RENDERED_MB"
   --volume "$VAULT_PATH:/vault"
   --volume "$OUTPUT_PATH:/output"
   --volume "$CONFIG_PATH:/config.json:ro"
@@ -94,7 +94,7 @@ echo "Exporting vault: $VAULT_PATH"
 echo "Writing output:  $OUTPUT_PATH"
 echo "Container name:   $CONTAINER_NAME"
 echo "Container memory: $EXPORT_MEMORY (memory+swap: $EXPORT_MEMORY_SWAP)"
-if [[ "$EXPORT_RESTART_AFTER_RENDERED_FILES" -gt 0 ]]; then
-  echo "Planned restart interval: $EXPORT_RESTART_AFTER_RENDERED_FILES newly rendered files"
+if [[ "$EXPORT_RESTART_AFTER_RENDERED_MB" -gt 0 ]]; then
+  echo "Planned restart interval: $EXPORT_RESTART_AFTER_RENDERED_MB MB of newly rendered Markdown"
 fi
 "${docker_args[@]}"

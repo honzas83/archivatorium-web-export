@@ -22,11 +22,12 @@ if ! [[ "$STARTUP_TIMEOUT_SECONDS" =~ ^[1-9][0-9]*$ ]]; then
   exit 2
 fi
 
-RESTART_AFTER_RENDERED_FILES="${EXPORT_RESTART_AFTER_RENDERED_FILES:-0}"
-if ! [[ "$RESTART_AFTER_RENDERED_FILES" =~ ^[0-9]+$ ]]; then
-  echo "EXPORT_RESTART_AFTER_RENDERED_FILES must be a non-negative integer, got: $RESTART_AFTER_RENDERED_FILES" >&2
+RESTART_AFTER_RENDERED_MB="${EXPORT_RESTART_AFTER_RENDERED_MB:-0}"
+if ! [[ "$RESTART_AFTER_RENDERED_MB" =~ ^[0-9]+$ ]]; then
+  echo "EXPORT_RESTART_AFTER_RENDERED_MB must be a non-negative integer, got: $RESTART_AFTER_RENDERED_MB" >&2
   exit 2
 fi
+RESTART_AFTER_RENDERED_BYTES=$((RESTART_AFTER_RENDERED_MB * 1024 * 1024))
 
 STATUS_FILE="/output/.docker-export-status.json"
 attempt=0
@@ -79,7 +80,7 @@ while true; do
   SCRIPT_STARTED=false
   LAST_PROGRESS_LOG=0
   FILE_LOG_LINES=0
-  RENDERED_SINCE_RESTART=0
+  RENDERED_BYTES_SINCE_RESTART=0
   PLANNED_RESTART=false
 
   # The status and progress files bypass Electron console forwarding. They make
@@ -88,17 +89,24 @@ while true; do
   while kill -0 "$INJECTOR_PID" 2>/dev/null; do
 	# Count only new render completions. Resume entries are logged as "Reused"
 	# and must not retrigger a restart before new documents are rendered.
-	if [[ "$RESTART_AFTER_RENDERED_FILES" -gt 0 && -f "$FILE_LOG" ]]; then
+	if [[ "$RESTART_AFTER_RENDERED_BYTES" -gt 0 && -f "$FILE_LOG" ]]; then
 		while IFS= read -r file_log_line; do
 			FILE_LOG_LINES=$((FILE_LOG_LINES + 1))
 			if [[ "$file_log_line" != *" Reused "* ]]; then
-				RENDERED_SINCE_RESTART=$((RENDERED_SINCE_RESTART + 1))
+				file_log_details="${file_log_line#"[export-file] "}"
+				source_path="${file_log_details#* }"
+				if [[ "$source_path" != "$file_log_details" ]]; then
+					source_size=$(stat -c '%s' "/vault/$source_path" 2>/dev/null || true)
+					if [[ "$source_size" =~ ^[0-9]+$ ]]; then
+						RENDERED_BYTES_SINCE_RESTART=$((RENDERED_BYTES_SINCE_RESTART + source_size))
+					fi
+				fi
 			fi
 		done < <(sed -n "$((FILE_LOG_LINES + 1)),\$p" "$FILE_LOG")
-		if [[ "$RENDERED_SINCE_RESTART" -ge "$RESTART_AFTER_RENDERED_FILES" ]]; then
+		if [[ "$RENDERED_BYTES_SINCE_RESTART" -ge "$RESTART_AFTER_RENDERED_BYTES" ]]; then
 			PLANNED_RESTART=true
-			printf '{"status":"planned-restart","attempt":%d,"rendered":%d}\n' "$attempt" "$RENDERED_SINCE_RESTART" > "$STATUS_FILE"
-			echo "Planned restart after ${RENDERED_SINCE_RESTART} newly rendered files (resume data is preserved)."
+			printf '{"status":"planned-restart","attempt":%d,"renderedBytes":%d,"limitBytes":%d}\n' "$attempt" "$RENDERED_BYTES_SINCE_RESTART" "$RESTART_AFTER_RENDERED_BYTES" > "$STATUS_FILE"
+			echo "Planned restart after ${RENDERED_BYTES_SINCE_RESTART} bytes of newly rendered Markdown (resume data is preserved)."
 			kill -TERM "$INJECTOR_PID" 2>/dev/null || true
 			cleanup_previous_attempt
 			break
