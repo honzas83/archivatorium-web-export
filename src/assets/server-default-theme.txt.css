@@ -155,7 +155,9 @@ a:hover { color: var(--text-accent-hover); text-decoration: underline; }
 .callout[data-callout="question"], .callout[data-callout="help"], .callout[data-callout="faq"] { --callout-color: 8, 109, 221; }
 .callout[data-callout="quote"], .callout[data-callout="cite"] { --callout-color: 158, 158, 158; }
 .callout[data-callout="abstract"] {
-  background: rgba(0, 191, 188, .08);
+  --callout-color: 0, 191, 188;
+  border: 0;
+  background: rgba(var(--callout-color), .1);
 }
 .callout-title {
   display: flex;
