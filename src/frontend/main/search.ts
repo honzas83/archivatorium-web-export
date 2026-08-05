@@ -314,6 +314,7 @@ export class Search
 		this.container?.classList.remove("has-content");
 		this.setSearchStatus("idle");
 		this.input.value = "";
+		this.updateBrowserQuery("");
 		this.clearCurrentDocumentSearch();
 		if (ObsidianSite.lazyNavigation) void ObsidianSite.lazyNavigation.clearFilter();
 		else {
@@ -381,6 +382,7 @@ export class Search
 				this.clear();
 				return;
 			}
+			this.updateBrowserQuery(query);
 			
 			try
 			{
@@ -393,6 +395,25 @@ export class Search
 		});
 
 		return this;
+	}
+
+	private updateBrowserQuery(query: string)
+	{
+		if (!ObsidianSite.isHttp) return;
+
+		const url = new URL(window.location.href);
+		if (query) url.searchParams.set("query", query);
+		else url.searchParams.delete("query");
+
+		const search = url.searchParams.toString()
+			.replace(/\+/g, "%20")
+			.replace(/%3A/gi, ":");
+		const browserURL = `${url.pathname}${search ? `?${search}` : ""}${url.hash}`;
+		history.replaceState(
+			{ pathname: LinkHandler.getPathnameFromURL(browserURL), url: browserURL },
+			document.title,
+			browserURL,
+		);
 	}
 
 	private createSearchStatus()
