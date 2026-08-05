@@ -1,6 +1,5 @@
 import { Shared } from "src/shared/shared";
 import { LinkHandler } from "./links";
-import { Notice } from "./notifications";
 import { getTextNodes } from "./utils";
 import MiniSearch, { SearchResult } from "minisearch";
 import { WebpageData } from "src/shared/website-data";
@@ -47,7 +46,9 @@ export class Search
 	private serverSide: boolean = false;
 	private searchEndpoint: string = "/api/search";
 	private searchRequestId: number = 0;
-	private limitNotice: Notice | undefined;
+	private status: HTMLElement;
+	private statusCount: HTMLElement;
+	private statusLimit: HTMLElement;
 	private static readonly inlineMarkClass = "search-mark";
 	private static readonly tagMarkClass = "search-tag-mark";
 	private static readonly visibleResultLimit = 1000;
@@ -73,26 +74,20 @@ export class Search
 		}
 
 		const requestId = ++this.searchRequestId;
-		const page = await this.runSearchQuery(query, type, Search.visibleResultLimit);
+		this.setSearchStatus("searching");
+		let page: { items: Array<SearchResult>, total: number };
+		try
+		{
+			page = await this.runSearchQuery(query, type, Search.visibleResultLimit);
+		}
+		catch (error)
+		{
+			if (requestId === this.searchRequestId) this.setSearchStatus("error");
+			throw error;
+		}
 		let results = page.items as Array<SearchResult>;
 		if (requestId !== this.searchRequestId) return;
-
-		if (page.total > Search.visibleResultLimit)
-		{
-			if (!this.limitNotice?.notification?.isConnected)
-			{
-				this.limitNotice = new Notice(
-					"More than 1,000 results found. Showing the first 1,000; refine your search to narrow them down.",
-					8000,
-					"search-limit-notice",
-				);
-			}
-		}
-		else if (this.limitNotice?.notification?.isConnected)
-		{
-			this.limitNotice.dismiss();
-			this.limitNotice = undefined;
-		}
+		this.setSearchStatus("complete", page.total);
 		
 		// filter results for the best matches and generate extra metadata
 		const showPaths: string[] = [];
@@ -317,8 +312,7 @@ export class Search
 	{
 		this.searchRequestId++;
 		this.container?.classList.remove("has-content");
-		this.limitNotice?.dismiss();
-		this.limitNotice = undefined;
+		this.setSearchStatus("idle");
 		this.input.value = "";
 		this.clearCurrentDocumentSearch();
 		if (ObsidianSite.lazyNavigation) void ObsidianSite.lazyNavigation.clearFilter();
@@ -336,6 +330,7 @@ export class Search
 		if (!this.input || !this.container) return;
 
 		ObsidianSite.metadata.featureOptions.search.insertFeature(document.body, this.container);
+		this.createSearchStatus();
 
 		this.serverSide = ObsidianSite.metadata.featureOptions.search.serverSide === true;
 		this.searchEndpoint = ObsidianSite.metadata.featureOptions.search.searchEndpoint ?? "/api/search";
@@ -398,6 +393,41 @@ export class Search
 		});
 
 		return this;
+	}
+
+	private createSearchStatus()
+	{
+		this.status = document.createElement("div");
+		this.status.id = "search-status";
+		this.status.className = "search-status is-idle";
+		this.status.setAttribute("role", "status");
+		this.status.setAttribute("aria-live", "polite");
+		this.status.setAttribute("aria-atomic", "true");
+
+		this.statusCount = document.createElement("span");
+		this.statusCount.className = "search-status-count";
+		this.statusLimit = document.createElement("span");
+		this.statusLimit.className = "search-status-limit";
+		this.status.append(this.statusCount, this.statusLimit);
+		this.container.append(this.status);
+	}
+
+	private setSearchStatus(state: "idle" | "searching" | "complete" | "error", total: number = 0)
+	{
+		if (!this.status) return;
+		this.status.className = `search-status is-${state}`;
+		this.statusLimit.textContent = "";
+
+		if (state === "idle") this.statusCount.textContent = "";
+		else if (state === "searching") this.statusCount.textContent = "Searching…";
+		else if (state === "error") this.statusCount.textContent = "Search unavailable";
+		else if (total === 0) this.statusCount.textContent = "No matching documents";
+		else this.statusCount.textContent = `${total.toLocaleString()} ${total === 1 ? "document" : "documents"}`;
+
+		if (state === "complete" && total > Search.visibleResultLimit)
+		{
+			this.statusLimit.textContent = `Showing first ${Search.visibleResultLimit.toLocaleString()}`;
+		}
 	}
 
 	public applyCurrentQueryToDocument()
