@@ -175,12 +175,6 @@ body #center-content > .obsidian-document > .markdown-preview-sizer {
 }
 
 #search-status {
-  position: absolute;
-  top: calc(100% + .15rem);
-  right: 0;
-  left: 0;
-}
-
-#left-sidebar:has(#search-status) #left-sidebar-content {
-  padding-top: calc(4em + 1.75rem);
+  flex: 0 0 1.75rem;
+  width: 100%;
 }

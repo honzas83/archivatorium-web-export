@@ -409,7 +409,7 @@ export class Search
 		this.statusLimit = document.createElement("span");
 		this.statusLimit.className = "search-status-limit";
 		this.status.append(this.statusCount, this.statusLimit);
-		this.container.append(this.status);
+		(document.querySelector("#left-sidebar-content") as HTMLElement).prepend(this.status);
 	}
 
 	private setSearchStatus(state: "idle" | "searching" | "complete" | "error", total: number = 0)
