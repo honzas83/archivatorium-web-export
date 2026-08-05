@@ -560,8 +560,13 @@ export class Search
 		// wait for page to fade in
 		setTimeout(() => 
 		{
-			if(firstMark) ObsidianSite.scrollTo(firstMark);
+			if(firstMark) this.scrollToSearchMatch(firstMark);
 		}, 500);
+	}
+
+	private scrollToSearchMatch(element: Element)
+	{
+		element.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
 	}
 
 	private updateOutlineSearchMatches()
@@ -622,7 +627,7 @@ export class Search
 			link.addEventListener("click", (event) =>
 			{
 				event.preventDefault();
-				ObsidianSite.scrollTo(element);
+				this.scrollToSearchMatch(element);
 			});
 			item.appendChild(link);
 			children.appendChild(item);
