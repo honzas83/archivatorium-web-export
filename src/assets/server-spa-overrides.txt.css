@@ -175,6 +175,7 @@ body #center-content > .obsidian-document > .markdown-preview-sizer {
 }
 
 #search-status {
-  flex: 0 0 1.75rem;
+  flex: 0 0 auto;
   width: 100%;
+  margin-bottom: .25rem;
 }
