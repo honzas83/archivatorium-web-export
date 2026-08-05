@@ -89,6 +89,10 @@ class RightSidebarViewManager {
 		return RightSidebarViewManager.instance;
 	}
 
+	public static showTableOfContents(): void {
+		RightSidebarViewManager.instance?.setActiveView("original");
+	}
+
 	public refresh(): void {
 		this.refreshing = true;
 
@@ -170,6 +174,10 @@ export class Tags extends DynamicInsertedFeature<TagsOptions, TagsDependencies> 
 
 	constructor(tagTree: TagTreeItemData[]) {
 		super(ObsidianSite.metadata.featureOptions.tags, { tagTree });
+	}
+
+	public static showTableOfContents(): void {
+		RightSidebarViewManager.showTableOfContents();
 	}
 
 	protected generateContent(container: HTMLElement) {

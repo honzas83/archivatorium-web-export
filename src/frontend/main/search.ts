@@ -3,6 +3,7 @@ import { LinkHandler } from "./links";
 import { getTextNodes } from "./utils";
 import MiniSearch, { SearchResult } from "minisearch";
 import { WebpageData } from "src/shared/website-data";
+import { Tags } from "./tags";
 
 export enum SearchType
 {
@@ -450,7 +451,7 @@ export class Search
 		}
 	}
 
-	public applyCurrentQueryToDocument()
+	public applyCurrentQueryToDocument(afterNavigation = false)
 	{
 		const query = this.input?.value?.trim() ?? "";
 		if (query.length == 0)
@@ -466,6 +467,7 @@ export class Search
 		}
 		else if (parsed.type === SearchType.Content || parsed.type === null)
 		{
+			if (afterNavigation) Tags.showTableOfContents();
 			this.searchCurrentDocument(parsed.value);
 		}
 		else
