@@ -60,6 +60,30 @@ Inline code \`#CodeTag\` and escaped \\#EscapedTag are not tags.
 		assert.equal(firstExport.writtenRecords, 3);
 		const database = new DatabaseSync(path.join(output, "corpus.sqlite"));
 		const records = database.prepare("SELECT payload FROM source_records").all().map((row) => JSON.parse(row.payload));
+		assert.deepEqual(
+			database.prepare("SELECT tag_path FROM document_tags ORDER BY length(tag_path), tag_path").all().map((row) => row.tag_path),
+			["1984a", "Topic", "Topic/Child"],
+		);
+		assert.deepEqual(
+			database.prepare("SELECT entry_path FROM navigation_entries WHERE parent_path = 'Folder' ORDER BY name").all().map((row) => row.entry_path),
+			["Folder/Source.md", "Folder/Target.md"],
+		);
+		const queryPlan = (sql, ...parameters) => database.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(...parameters)
+			.map((row) => row.detail).join("\n");
+		assert.match(queryPlan("SELECT * FROM document_tags WHERE tag_key = ?", "topic"), /document_tags_key/);
+		const tagSearchPlan = queryPlan(`
+			SELECT documents.export_path
+			FROM document_tags tags
+			JOIN metadata_documents documents ON documents.document_id = tags.document_id
+			WHERE tags.tag_key = ? AND documents.kind = 'webpage'
+			ORDER BY tags.source_path COLLATE NOCASE, tags.source_path
+		`, "topic");
+		assert.match(tagSearchPlan, /document_tags_key/);
+		assert.doesNotMatch(tagSearchPlan, /TEMP B-TREE/);
+		assert.match(queryPlan("SELECT * FROM navigation_entries WHERE parent_path = ?", "Folder"), /PRIMARY KEY/);
+		assert.match(queryPlan("DELETE FROM metadata_redirects WHERE export_path = ?", "folder/source.html"), /metadata_redirects_export_path/);
+		assert.match(queryPlan("SELECT * FROM metadata_documents WHERE source_basename = ? COLLATE NOCASE", "Target.md"), /metadata_documents_basename/);
+		assert.match(queryPlan("DELETE FROM search_documents WHERE rowid = ?", 1), /VIRTUAL TABLE INDEX/);
 		database.close();
 		const source = records.find((record) => record.data?.sourcePath === "Folder/Source.md");
 		const attachment = records.find((record) => record.data?.sourcePath === "Folder/Report.pdf");

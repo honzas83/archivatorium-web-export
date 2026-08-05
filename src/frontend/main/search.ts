@@ -144,11 +144,6 @@ export class Search
 		{
 			ObsidianSite.fileTree?.filter(showPaths);
 			ObsidianSite.fileTree?.setSubHeadings(headerLinks);
-			ObsidianSite.fileTree?.sort((a, b) =>
-			{
-				if (!a || !b) return 0;
-				return showPaths.findIndex((path) => a.path == path) - showPaths.findIndex((path) => b.path == path);
-			});
 		}
 
 		this.applyCurrentQueryToDocument();

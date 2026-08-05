@@ -124,7 +124,10 @@ export class LazyNavigation {
 				item.path = child.path;
 				appendFolder(item, child);
 			}
-			for (const document of folder.documents) {
+			for (const document of folder.documents.sort((a, b) =>
+				a.title.localeCompare(b.title, undefined, { numeric: true, sensitivity: "base" }) ||
+				a.sourcePath.localeCompare(b.sourcePath, undefined, { numeric: true, sensitivity: "base" })
+			)) {
 				this.tree.appendItem(parent, this.createItemElement({ kind: "document", name: document.title, path: document.sourcePath, exportPath: document.exportPath, hasChildren: false }, parent.depth + 1));
 			}
 		};

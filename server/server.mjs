@@ -6,7 +6,7 @@ import { readFile, readdir, stat } from "node:fs/promises";
 import { DatabaseSync } from "node:sqlite";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { exportMarkdownSpa, getMarkdownSpaApplicationVersion, SERVER_RUNTIME_FILENAMES, writeMarkdownSpaApplication } from "./export-markdown-spa.mjs";
+import { exportMarkdownSpa, getMarkdownSpaApplicationVersion, RECORD_FORMAT_VERSION, SERVER_RUNTIME_FILENAMES, writeMarkdownSpaApplication } from "./export-markdown-spa.mjs";
 import { MarkdownDocumentRenderer } from "./markdown-renderer.mjs";
 import { resolveCorpusDatabasePath, resolveServerRoot, resolveVaultRoot } from "./vault-layout.mjs";
 
@@ -21,11 +21,8 @@ const MAX_CHECKOUT_ITEMS_OVERRIDE = process.env.MAX_CHECKOUT_ITEMS;
 const DEFAULT_MAX_CHECKOUT_ITEMS = 0;
 const MINIMUM_SEARCH_API_LIMIT = 1001;
 const CORPUS_DATABASE_PATH = resolveCorpusDatabasePath(VAULT_ROOT);
-const SEARCH_VALUE_SEPARATOR = "\u001f";
 const PAGE_CACHE_ENTRIES = Math.max(1, Number(process.env.PAGE_CACHE_ENTRIES ?? 256));
 let corpusDatabasePromise;
-const navigationSnapshotPromises = new Map();
-let tagSnapshotPromise;
 const markdownRenderer = new MarkdownDocumentRenderer({ maxEntries: PAGE_CACHE_ENTRIES });
 const corpusStatus = {
 	state: "idle",
@@ -114,14 +111,6 @@ function searchColumnsForType(type) {
 	return columns;
 }
 
-function joinSearchValues(values) {
-	return Array.isArray(values) ? values.map(String).join(SEARCH_VALUE_SEPARATOR) : "";
-}
-
-function splitSearchValues(value) {
-	return value ? String(value).split(SEARCH_VALUE_SEPARATOR) : [];
-}
-
 function getMaxCheckoutItems(metadata) {
 	const configured = MAX_CHECKOUT_ITEMS_OVERRIDE ??
 		metadata?.featureOptions?.shoppingBasket?.maxCheckoutItems ??
@@ -152,6 +141,7 @@ async function initializeCorpusDatabase() {
 	corpusStatus.state = "opening";
 	let databaseExists = false;
 	let databaseMode;
+	let recordFormat;
 	try {
 		if (!(await stat(CORPUS_DATABASE_PATH)).isFile()) throw new Error(`Corpus path is not a file: ${CORPUS_DATABASE_PATH}`);
 		databaseExists = true;
@@ -162,6 +152,7 @@ async function initializeCorpusDatabase() {
 		const existingDatabase = new DatabaseSync(CORPUS_DATABASE_PATH);
 		try {
 			databaseMode = existingDatabase.prepare("SELECT value FROM export_state WHERE key = 'mode'").get()?.value;
+			recordFormat = existingDatabase.prepare("SELECT value FROM export_state WHERE key = 'record_format'").get()?.value;
 		} catch {
 			databaseMode = undefined;
 		} finally {
@@ -170,12 +161,14 @@ async function initializeCorpusDatabase() {
 	}
 	const applicationStatus = await getGeneratedApplicationStatus();
 	const currentApplicationVersion = await getMarkdownSpaApplicationVersion();
-	if (databaseMode !== "direct-markdown-spa") {
+	if (databaseMode !== "direct-markdown-spa" || recordFormat !== RECORD_FORMAT_VERSION) {
 		corpusStatus.state = "indexing";
-		console.log(databaseExists
-			? `[companion-sqlite] database is incomplete; resuming vault index in ${CORPUS_DATABASE_PATH}`
-			: `[companion-sqlite] database missing; indexing vault into ${CORPUS_DATABASE_PATH}`
-		);
+		const message = !databaseExists
+			? "database missing; indexing vault"
+			: databaseMode === "direct-markdown-spa" && recordFormat !== RECORD_FORMAT_VERSION
+				? `database format ${recordFormat ?? "unknown"} is outdated; rebuilding vault index`
+				: "database is incomplete; rebuilding vault index";
+		console.log(`[companion-sqlite] ${message} in ${CORPUS_DATABASE_PATH}`);
 		await exportMarkdownSpa({ vaultRoot: VAULT_ROOT, writeApplication: false });
 	}
 	if (!applicationStatus.complete) {
@@ -188,7 +181,10 @@ async function initializeCorpusDatabase() {
 	const database = new DatabaseSync(CORPUS_DATABASE_PATH);
 	try {
 		const mode = database.prepare("SELECT value FROM export_state WHERE key = 'mode'").get()?.value;
-		if (mode !== "direct-markdown-spa") throw new Error("SQLite database was not created by the direct Markdown SPA exporter.");
+		const format = database.prepare("SELECT value FROM export_state WHERE key = 'record_format'").get()?.value;
+		if (mode !== "direct-markdown-spa" || format !== RECORD_FORMAT_VERSION) {
+			throw new Error("SQLite database was not created by the current direct Markdown SPA exporter.");
+		}
 		corpusStatus.total = Number(database.prepare("SELECT COUNT(*) AS count FROM source_records").get().count);
 		corpusStatus.processed = corpusStatus.total;
 		corpusStatus.state = "ready";
@@ -206,69 +202,38 @@ function getCorpusDatabase() {
 	return corpusDatabasePromise;
 }
 
-function buildTagTree(rows, showInlineTags, showFrontmatterTags) {
-	const root = new Map();
-	for (const row of rows) {
-		const tags = new Set([
-			...(showInlineTags ? splitSearchValues(row.inline_tags) : []),
-			...(showFrontmatterTags ? splitSearchValues(row.frontmatter_tags) : []),
-		]);
-		for (const tag of tags) {
-			let nodes = root;
-			let currentPath = "";
-			for (const part of String(tag).replace(/^#+/, "").split("/").map((value) => value.trim()).filter(Boolean)) {
-				currentPath = currentPath ? `${currentPath}/${part}` : part;
-				let node = nodes.get(part);
-				if (!node) {
-					node = { name: part, path: currentPath, count: 0, children: new Map() };
-					nodes.set(part, node);
-				}
-				node.count++;
-				nodes = node.children;
-			}
-		}
-	}
-	const serialize = (nodes) => Array.from(nodes.values())
-		.sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" }))
-		.map((node) => ({ name: node.name, path: node.path, count: node.count, children: serialize(node.children) }));
-	return serialize(root);
+function tagVisibilityClause(metadata, alias = "") {
+	const prefix = alias ? `${alias}.` : "";
+	const showInline = metadata.featureOptions?.tags?.showInlineTags !== false;
+	const showFrontmatter = metadata.featureOptions?.tags?.showFrontmatterTags !== false;
+	if (showInline && showFrontmatter) return "1 = 1";
+	if (showInline) return `${prefix}inline_tag = 1`;
+	if (showFrontmatter) return `${prefix}frontmatter_tag = 1`;
+	return "0 = 1";
 }
 
-async function getTagSnapshot() {
-	if (!tagSnapshotPromise) {
-		tagSnapshotPromise = (async () => {
-			const metadata = await loadBootstrapMetadata();
-			const database = await getCorpusDatabase();
-			const rows = database.prepare(
-				"SELECT inline_tags, frontmatter_tags FROM metadata_documents WHERE kind = 'webpage'"
-			).all();
-			const tree = buildTagTree(
-				rows,
-				metadata.featureOptions?.tags?.showInlineTags !== false,
-				metadata.featureOptions?.tags?.showFrontmatterTags !== false,
-			);
-			const childrenByParent = new Map([["", tree]]);
-			const visit = (nodes) => {
-				for (const node of nodes) {
-					childrenByParent.set(node.path, node.children);
-					visit(node.children);
-				}
-			};
-			visit(tree);
-			return childrenByParent;
-		})();
-	}
-	return tagSnapshotPromise;
-}
-
-function serializeTagChildren(nodes) {
-	return nodes.map((node) => ({
-		name: node.name,
-		path: node.path,
-		count: node.count,
-		hasChildren: node.children.length > 0,
-		children: [],
-	}));
+async function getTagChildren(parent = "") {
+	const metadata = await loadBootstrapMetadata();
+	const database = await getCorpusDatabase();
+	const visibility = tagVisibilityClause(metadata, "tags");
+	const childVisibility = tagVisibilityClause(metadata, "children");
+	const rows = database.prepare(`
+		SELECT tags.tag_key, MIN(tags.tag_name) AS name, MIN(tags.tag_path) AS path,
+			COUNT(*) AS count,
+			EXISTS(
+				SELECT 1 FROM document_tags children
+				WHERE children.parent_key = tags.tag_key AND ${childVisibility}
+			) AS has_children
+		FROM document_tags tags
+		WHERE tags.parent_key = ? AND ${visibility}
+		GROUP BY tags.tag_key
+	`).all(String(parent).toLowerCase());
+	return rows
+		.map((row) => ({
+			name: row.name, path: row.path, count: Number(row.count),
+			hasChildren: Boolean(row.has_children), children: [],
+		}))
+		.sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" }));
 }
 
 async function handleMetadataBootstrap(_request, response) {
@@ -282,12 +247,11 @@ async function handleMetadataBootstrap(_request, response) {
 
 async function getAppBootstrap() {
 	const metadata = JSON.parse(await readFile(path.join(SERVER_ROOT, "site-lib", "metadata.json"), "utf8"));
-	const tagSnapshot = await getTagSnapshot();
 	const database = await getCorpusDatabase();
 	metadata.documentCount = Number(database.prepare(
 		"SELECT COUNT(*) AS count FROM metadata_documents WHERE kind = 'webpage'"
 	).get().count);
-	metadata.tagTree = serializeTagChildren(tagSnapshot.get("") ?? []);
+	metadata.tagTree = await getTagChildren("");
 	metadata.webpages = {};
 	metadata.fileInfo = {};
 	metadata.sourceToTarget = {};
@@ -300,10 +264,9 @@ async function handleTags(request, response) {
 	try {
 		const requestURL = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
 		const parent = normalizeNavigationParent(requestURL.searchParams.get("parent") ?? "");
-		const snapshot = await getTagSnapshot();
 		sendJSON(response, 200, {
 			parent,
-			items: serializeTagChildren(snapshot.get(parent) ?? []),
+			items: await getTagChildren(parent),
 		});
 	} catch (error) {
 		sendJSON(response, 400, { error: error.message ?? "Tag request failed." });
@@ -326,59 +289,29 @@ async function useDocumentTitlesInNavigation() {
 	return metadata.featureOptions?.fileNavigation?.showDocumentTitles === true;
 }
 
-async function getNavigationSnapshot(showDocumentTitles) {
-	const cacheKey = showDocumentTitles ? "titles" : "filenames";
-	let snapshot = navigationSnapshotPromises.get(cacheKey);
-	if (!snapshot) {
-		snapshot = (async () => {
-		const database = await getCorpusDatabase();
-		const childrenByParent = new Map();
-		const rows = database.prepare(`
-			SELECT source_path, export_path, kind, title, show_in_tree, tree_order, type
-			FROM metadata_documents WHERE show_in_tree = 1
-		`).all();
-		const addChild = (parent, item) => {
-			const children = childrenByParent.get(parent) ?? new Map();
-			const existing = children.get(item.path);
-			if (!existing || item.kind === "document") children.set(item.path, item);
-			childrenByParent.set(parent, children);
-		};
-		for (const row of rows) {
-			const parts = String(row.source_path).replaceAll("\\", "/").split("/").filter(Boolean);
-			if (parts.length === 0) continue;
-			let parent = "";
-			for (let index = 0; index < parts.length - 1; index++) {
-				const folderPath = parent ? `${parent}/${parts[index]}` : parts[index];
-				addChild(parent, { kind: "folder", name: parts[index], path: folderPath, hasChildren: true });
-				parent = folderPath;
-			}
-			addChild(parent, {
-				kind: "document",
-				name: showDocumentTitles ? (row.title || parts.at(-1)) : path.posix.basename(parts.at(-1), path.posix.extname(parts.at(-1))),
-				path: row.source_path,
-				exportPath: row.export_path,
-				type: row.type,
-				treeOrder: Number(row.tree_order ?? 0),
-				hasChildren: false,
-			});
-		}
-		return childrenByParent;
-		})();
-		navigationSnapshotPromises.set(cacheKey, snapshot);
-	}
-	return snapshot;
-}
-
 async function handleNavigation(request, response) {
 	try {
 		const showDocumentTitles = await useDocumentTitlesInNavigation();
 		const requestURL = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
 		const parent = normalizeNavigationParent(requestURL.searchParams.get("parent") ?? "");
-		const snapshot = await getNavigationSnapshot(showDocumentTitles);
-		const items = Array.from(snapshot.get(parent)?.values() ?? []).sort((a, b) => {
+		const database = await getCorpusDatabase();
+		const items = database.prepare(`
+			SELECT entries.kind, entries.name, entries.entry_path AS path,
+				entries.source_path, entries.export_path, entries.type, documents.title
+			FROM navigation_entries entries
+			LEFT JOIN metadata_documents documents ON documents.export_path = entries.export_path
+			WHERE entries.parent_path = ?
+		`).all(parent).map((row) => ({
+			kind: row.kind,
+			name: showDocumentTitles && row.kind === "document" ? (row.title || row.name) : row.name,
+			path: row.path,
+			sourcePath: row.source_path,
+			exportPath: row.export_path,
+			type: row.type,
+			hasChildren: row.kind === "folder",
+		})).sort((a, b) => {
 			if (a.kind !== b.kind) return a.kind === "folder" ? -1 : 1;
-			return (a.treeOrder ?? Number.MAX_SAFE_INTEGER) - (b.treeOrder ?? Number.MAX_SAFE_INTEGER) ||
-				a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" });
+			return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" });
 		});
 		sendJSON(response, 200, { parent, items });
 	} catch (error) {
@@ -400,16 +333,21 @@ function resolveCorpusLink(database, sourcePath, target) {
 		}
 	}
 	const statement = database.prepare("SELECT export_path, source_path FROM metadata_documents WHERE source_path = ? LIMIT 1");
-	const basenameStatement = database.prepare(
-		"SELECT export_path, source_path FROM metadata_documents WHERE source_path LIKE ? ORDER BY tree_order, source_path LIMIT 1"
-	);
+	const basenameStatement = database.prepare(`
+		SELECT export_path, source_path FROM metadata_documents
+		WHERE source_basename = ? COLLATE NOCASE ORDER BY tree_order, source_path LIMIT 1
+	`);
 	for (const candidate of candidates) {
 		const row = statement.get(candidate);
 		if (row) return { exportPath: row.export_path, sourcePath: row.source_path };
 	}
 	if (!normalizedTarget.includes("/")) {
-		const row = basenameStatement.get(`%/${normalizedTarget}`);
-		if (row) return { exportPath: row.export_path, sourcePath: row.source_path };
+		const basenames = [path.posix.basename(normalizedTarget)];
+		if (!path.posix.extname(normalizedTarget)) basenames.push(`${basenames[0]}.md`);
+		for (const basename of basenames) {
+			const row = basenameStatement.get(basename);
+			if (row) return { exportPath: row.export_path, sourcePath: row.source_path };
+		}
 	}
 	return undefined;
 }
@@ -482,20 +420,21 @@ async function runCorpusSearch({ query, type = 127, offset = 0, limit = 50 }) {
 	if (normalizedType === 8) {
 		const tag = normalizedQuery.replace(/^#+/, "").toLowerCase();
 		if (!tag) return { query: normalizedQuery, type: normalizedType, offset: normalizedOffset, total, items: [] };
-		const separator = SEARCH_VALUE_SEPARATOR;
-		const where = `
-			instr(? || replace(lower(tags), '#', '') || ?, ? || ? || ?) > 0
-			OR instr(? || replace(lower(tags), '#', ''), ? || ? || '/') > 0
-		`;
-		const parameters = [separator, separator, separator, tag, separator, separator, separator, tag];
-		total = Number(database.prepare(`SELECT COUNT(*) AS count FROM search_documents WHERE ${where}`).get(...parameters).count);
+		total = Number(database.prepare(`
+			SELECT COUNT(*) AS count
+			FROM document_tags tags
+			JOIN metadata_documents documents ON documents.document_id = tags.document_id
+			WHERE tags.tag_key = ? AND documents.kind = 'webpage'
+		`).get(tag).count);
 		if (normalizedLimit > 0) {
 			rows = database.prepare(`
-				SELECT path, source_path, title, 0 AS rank
-				FROM search_documents WHERE ${where}
-				ORDER BY source_path
+				SELECT documents.export_path AS path, documents.source_path, documents.title, 0 AS rank
+				FROM document_tags tags
+				JOIN metadata_documents documents ON documents.document_id = tags.document_id
+				WHERE tags.tag_key = ? AND documents.kind = 'webpage'
+				ORDER BY tags.source_path COLLATE NOCASE, tags.source_path
 				LIMIT ? OFFSET ?
-			`).all(...parameters, normalizedLimit, normalizedOffset);
+			`).all(tag, normalizedLimit, normalizedOffset);
 		}
 	} else {
 		const tokenQuery = tokenizeSearchQuery(normalizedQuery);
@@ -544,14 +483,13 @@ async function getAllCorpusSearchItems(query, type = 127) {
 	if (normalizedType === 8) {
 		const tag = normalizedQuery.replace(/^#+/, "").toLowerCase();
 		if (!tag) return [];
-		const separator = SEARCH_VALUE_SEPARATOR;
-		const where = `
-			instr(? || replace(lower(tags), '#', '') || ?, ? || ? || ?) > 0
-			OR instr(? || replace(lower(tags), '#', ''), ? || ? || '/') > 0
-		`;
 		rows = database.prepare(`
-			SELECT path, source_path, title FROM search_documents WHERE ${where}
-		`).all(separator, separator, separator, tag, separator, separator, separator, tag);
+			SELECT documents.export_path AS path, documents.source_path, documents.title
+			FROM document_tags tags
+			JOIN metadata_documents documents ON documents.document_id = tags.document_id
+			WHERE tags.tag_key = ? AND documents.kind = 'webpage'
+			ORDER BY tags.source_path COLLATE NOCASE, tags.source_path
+		`).all(tag);
 	} else {
 		const tokenQuery = tokenizeSearchQuery(normalizedQuery);
 		const columns = searchColumnsForType(normalizedType);
