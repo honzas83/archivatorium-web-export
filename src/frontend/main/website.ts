@@ -349,13 +349,25 @@ export class ObsidianWebsite {
 		url = LinkHandler.getPathnameFromURL(url);
 		url = this.resolveWebpagePath(url) ?? url;
 		console.log("Loading URL", url, header, query);
+		const hasSearchQuery = query.startsWith("query=");
+		const browserQuery = hasSearchQuery
+			? query
+			: LinkHandler.getQueryFromURL(window.location.href);
+		const retainedQuery = browserQuery.startsWith("query=") ? browserQuery : "";
 
-		if (query && query.startsWith("query=")) {
+		if (hasSearchQuery) {
 			await this.search?.searchParseFilters(query.substring(6));
-			if (this.isHttp && pushState) {
-				this.updateBrowserHistory(this.getBrowserURL(url, query, header), document.title);
+			// Query links update the current search without navigating away. A
+			// popstate carrying both a document path and query must restore both.
+			if (pushState || this.document.pathname === url) {
+				if (this.isHttp && pushState) {
+					this.updateBrowserHistory(
+						this.getBrowserURL(this.document.pathname, query, header),
+						document.title,
+					);
+				}
+				return;
 			}
-			return;
 		}
 
 		// if this document is already loaded
@@ -364,9 +376,9 @@ export class ObsidianWebsite {
 			else if (pushState) {
 				new Notice("This page is already loaded.");
 			}
-			if (!pushState) this.search?.clear();
+			if (!pushState && !hasSearchQuery) this.search?.clear();
 			if (this.isHttp && pushState && header) {
-				this.updateBrowserHistory(this.getBrowserURL(url, "", header), this.document.title);
+				this.updateBrowserHistory(this.getBrowserURL(url, retainedQuery, header), this.document.title);
 			}
 
 			return this.document;
@@ -408,7 +420,7 @@ export class ObsidianWebsite {
 
 		if (this.document && this.isHttp && pushState) {
 			this.updateBrowserHistory(
-				this.getBrowserURL(this.document.pathname, "", header),
+				this.getBrowserURL(this.document.pathname, retainedQuery, header),
 				this.document.title,
 			);
 		}
