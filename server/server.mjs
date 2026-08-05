@@ -22,8 +22,12 @@ const DEFAULT_MAX_CHECKOUT_ITEMS = 0;
 const MINIMUM_SEARCH_API_LIMIT = 1001;
 const CORPUS_DATABASE_PATH = resolveCorpusDatabasePath(VAULT_ROOT);
 const PAGE_CACHE_ENTRIES = Math.max(1, Number(process.env.PAGE_CACHE_ENTRIES ?? 256));
+const SEARCH_CACHE_ENTRIES = Math.max(0, Number(process.env.SEARCH_CACHE_ENTRIES ?? 128));
+const SQLITE_MMAP_SIZE_MB = Math.max(0, Number(process.env.SQLITE_MMAP_SIZE_MB ?? 1536));
+const SQLITE_CACHE_SIZE_MB = Math.max(1, Number(process.env.SQLITE_CACHE_SIZE_MB ?? 256));
 let corpusDatabasePromise;
 const markdownRenderer = new MarkdownDocumentRenderer({ maxEntries: PAGE_CACHE_ENTRIES });
+const searchCache = new Map();
 const corpusStatus = {
 	state: "idle",
 	processed: 0,
@@ -75,6 +79,22 @@ function sendJSON(response, statusCode, value) {
 	send(response, statusCode, JSON.stringify(value), {
 		"Content-Type": "application/json; charset=utf-8",
 	});
+}
+
+function getCachedSearch(key) {
+	const value = searchCache.get(key);
+	if (value === undefined) return undefined;
+	searchCache.delete(key);
+	searchCache.set(key, value);
+	return value;
+}
+
+function cacheSearch(key, value) {
+	if (SEARCH_CACHE_ENTRIES === 0) return value;
+	searchCache.delete(key);
+	searchCache.set(key, value);
+	while (searchCache.size > SEARCH_CACHE_ENTRIES) searchCache.delete(searchCache.keys().next().value);
+	return value;
 }
 
 function escapeHTML(value) {
@@ -180,6 +200,13 @@ async function initializeCorpusDatabase() {
 	}
 	const database = new DatabaseSync(CORPUS_DATABASE_PATH);
 	try {
+		const mmapBytes = Math.trunc(SQLITE_MMAP_SIZE_MB * 1024 * 1024);
+		const cacheKiB = Math.trunc(SQLITE_CACHE_SIZE_MB * 1024);
+		database.exec(`
+			PRAGMA mmap_size = ${mmapBytes};
+			PRAGMA cache_size = -${cacheKiB};
+			PRAGMA temp_store = MEMORY;
+		`);
 		const mode = database.prepare("SELECT value FROM export_state WHERE key = 'mode'").get()?.value;
 		const format = database.prepare("SELECT value FROM export_state WHERE key = 'record_format'").get()?.value;
 		if (mode !== "direct-markdown-spa" || format !== RECORD_FORMAT_VERSION) {
@@ -188,7 +215,8 @@ async function initializeCorpusDatabase() {
 		corpusStatus.total = Number(database.prepare("SELECT COUNT(*) AS count FROM source_records").get().count);
 		corpusStatus.processed = corpusStatus.total;
 		corpusStatus.state = "ready";
-		console.log(`[companion-sqlite] opened ${corpusStatus.total} direct records from ${CORPUS_DATABASE_PATH}`);
+		const effectiveMmap = Number(database.prepare("PRAGMA mmap_size").get().mmap_size);
+		console.log(`[companion-sqlite] opened ${corpusStatus.total} direct records from ${CORPUS_DATABASE_PATH} (mmap ${Math.round(effectiveMmap / 1048576)} MB, cache ${SQLITE_CACHE_SIZE_MB} MB)`);
 	} catch (error) {
 		database.close();
 		corpusStatus.state = "error";
@@ -413,6 +441,9 @@ async function runCorpusSearch({ query, type = 127, offset = 0, limit = 50 }) {
 	const normalizedType = Number(type);
 	const normalizedOffset = Math.max(0, Math.trunc(Number(offset) || 0));
 	const normalizedLimit = Math.max(0, Math.trunc(Number(limit) || 0));
+	const cacheKey = JSON.stringify([normalizedQuery.toLocaleLowerCase(), normalizedType, normalizedOffset, normalizedLimit]);
+	const cached = getCachedSearch(cacheKey);
+	if (cached !== undefined) return cached;
 	const database = await getCorpusDatabase();
 	let rows = [];
 	let total = 0;
@@ -428,7 +459,7 @@ async function runCorpusSearch({ query, type = 127, offset = 0, limit = 50 }) {
 		`).get(tag).count);
 		if (normalizedLimit > 0) {
 			rows = database.prepare(`
-				SELECT documents.export_path AS path, documents.source_path, documents.title, 0 AS rank
+				SELECT documents.export_path AS path, documents.source_path, documents.title
 				FROM document_tags tags
 				JOIN metadata_documents documents ON documents.document_id = tags.document_id
 				WHERE tags.tag_key = ? AND documents.kind = 'webpage'
@@ -448,18 +479,18 @@ async function runCorpusSearch({ query, type = 127, offset = 0, limit = 50 }) {
 		).get(matchQuery).count);
 		if (normalizedLimit > 0) {
 			rows = database.prepare(`
-				SELECT path, source_path, title,
-					bm25(search_documents, 0, 0, 2, 8, 1.8, 1.5, 1.3, 1) AS rank
+				SELECT documents.export_path AS path, documents.source_path, documents.title
 				FROM search_documents
+				JOIN metadata_documents documents ON documents.document_id = search_documents.rowid
 				WHERE search_documents MATCH ?
-				ORDER BY rank
+				ORDER BY documents.source_path COLLATE NOCASE, documents.source_path
 				LIMIT ? OFFSET ?
 			`).all(matchQuery, normalizedLimit, normalizedOffset);
 		}
 	}
 
 	const showDocumentTitles = await useDocumentTitlesInNavigation();
-	return {
+	return cacheSearch(cacheKey, {
 		query: normalizedQuery,
 		type: normalizedType,
 		offset: normalizedOffset,
@@ -472,7 +503,7 @@ async function runCorpusSearch({ query, type = 127, offset = 0, limit = 50 }) {
 				? row.title
 				: path.posix.basename(row.source_path, path.posix.extname(row.source_path)),
 		})),
-	};
+	});
 }
 
 async function getAllCorpusSearchItems(query, type = 127) {
@@ -496,8 +527,11 @@ async function getAllCorpusSearchItems(query, type = 127) {
 		if (!tokenQuery || columns.length === 0) return [];
 		const matchQuery = `{${columns.join(" ")}} : (${tokenQuery})`;
 		rows = database.prepare(`
-			SELECT path, source_path, title
-			FROM search_documents WHERE search_documents MATCH ?
+			SELECT documents.export_path AS path, documents.source_path, documents.title
+			FROM search_documents
+			JOIN metadata_documents documents ON documents.document_id = search_documents.rowid
+			WHERE search_documents MATCH ?
+			ORDER BY documents.source_path COLLATE NOCASE, documents.source_path
 		`).all(matchQuery);
 	}
 	return rows.map((row) => ({

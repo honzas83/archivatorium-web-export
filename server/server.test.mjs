@@ -109,6 +109,16 @@ Version one with complete searchable text, [[Target]], [Loose](Loose.md), ![[Att
 		});
 		assert.deepEqual((await missingTermResponse.json()).items, []);
 
+		const lexicalResponse = await fetch(`${baseURL}/api/search`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ query: "content", type: 32, limit: 50 }),
+		});
+		assert.deepEqual(
+			(await lexicalResponse.json()).items.map((item) => item.sourcePath),
+			["Archive/Loose.md", "Target.md"],
+		);
+
 		const statusResponse = await fetch(`${baseURL}/api/search/status`);
 		assert.equal(statusResponse.status, 200);
 		assert.deepEqual(await statusResponse.json(), {

@@ -84,6 +84,11 @@ Inline code \`#CodeTag\` and escaped \\#EscapedTag are not tags.
 		assert.match(queryPlan("DELETE FROM metadata_redirects WHERE export_path = ?", "folder/source.html"), /metadata_redirects_export_path/);
 		assert.match(queryPlan("SELECT * FROM metadata_documents WHERE source_basename = ? COLLATE NOCASE", "Target.md"), /metadata_documents_basename/);
 		assert.match(queryPlan("DELETE FROM search_documents WHERE rowid = ?", 1), /VIRTUAL TABLE INDEX/);
+		const ftsSchema = database.prepare("SELECT sql FROM sqlite_master WHERE name = 'search_documents'").get().sql;
+		assert.match(ftsSchema, /content\s*=\s*''/i);
+		assert.match(ftsSchema, /contentless_delete\s*=\s*1/i);
+		assert.match(ftsSchema, /detail\s*=\s*column/i);
+		assert.equal(database.prepare("SELECT content FROM search_documents WHERE search_documents MATCH 'trusted'").get().content, null);
 		database.close();
 		const source = records.find((record) => record.data?.sourcePath === "Folder/Source.md");
 		const attachment = records.find((record) => record.data?.sourcePath === "Folder/Report.pdf");

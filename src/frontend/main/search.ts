@@ -47,6 +47,8 @@ export class Search
 	private serverSide: boolean = false;
 	private searchEndpoint: string = "/api/search";
 	private searchRequestId: number = 0;
+	private searchAbortController: AbortController | undefined;
+	private inputSearchTimer: number | undefined;
 	private status: HTMLElement;
 	private statusCount: HTMLElement;
 	private statusLimit: HTMLElement;
@@ -55,6 +57,7 @@ export class Search
 	private static readonly tagMarkClass = "search-tag-mark";
 	private static readonly outlineMatchClass = "outline-search-match";
 	private static readonly visibleResultLimit = 1000;
+	private static readonly inputDebounceMs = 180;
 
 	public async search(query: string, type: SearchType = allSearch)
 	{
@@ -81,10 +84,11 @@ export class Search
 		let page: { items: Array<SearchResult>, total: number };
 		try
 		{
-			page = await this.runSearchQuery(query, type, Search.visibleResultLimit);
+			page = await this.runSearchQuery(query, type, Search.visibleResultLimit, 0, true);
 		}
 		catch (error)
 		{
+			if ((error as Error)?.name === "AbortError") return;
 			if (requestId === this.searchRequestId) this.setSearchStatus("error");
 			throw error;
 		}
@@ -205,7 +209,7 @@ export class Search
 		};
 	}
 
-	private async runSearchQuery(query: string, type: SearchType, limit: number, offset: number = 0): Promise<{ items: Array<SearchResult>, total: number }>
+	private async runSearchQuery(query: string, type: SearchType, limit: number, offset: number = 0, interactive = false): Promise<{ items: Array<SearchResult>, total: number }>
 	{
 		const searchFields: string[] = [];
 		if (type & SearchType.Title) searchFields.push('title');
@@ -219,12 +223,23 @@ export class Search
 		const searchQuery = type === SearchType.Tags ? query : this.expandMetadataQuery(query);
 		if (this.serverSide)
 		{
-			const response = await fetch(this.searchEndpoint, {
-				method: "POST",
-				credentials: "same-origin",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ query: searchQuery, type, limit, offset }),
-			});
+			const controller = interactive ? new AbortController() : undefined;
+			if (controller) {
+				this.searchAbortController?.abort();
+				this.searchAbortController = controller;
+			}
+			let response: Response;
+			try {
+				response = await fetch(this.searchEndpoint, {
+					method: "POST",
+					credentials: "same-origin",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify({ query: searchQuery, type, limit, offset }),
+					signal: controller?.signal,
+				});
+			} finally {
+				if (controller && this.searchAbortController === controller) this.searchAbortController = undefined;
+			}
 			if (!response.ok) throw new Error(`Search server returned ${response.status}.`);
 			const data = await response.json();
 			return {
@@ -308,6 +323,10 @@ export class Search
 
 	public clear()
 	{
+		if (this.inputSearchTimer !== undefined) window.clearTimeout(this.inputSearchTimer);
+		this.inputSearchTimer = undefined;
+		this.searchAbortController?.abort();
+		this.searchAbortController = undefined;
 		this.searchRequestId++;
 		this.container?.classList.remove("has-content");
 		this.setSearchStatus("idle", this.documentCount);
@@ -374,7 +393,7 @@ export class Search
 			}
 		});
 
-		this.input.addEventListener('input', async (event) =>
+		this.input.addEventListener('input', (event) =>
 		{
 			const query = (event.target as HTMLInputElement)?.value ?? "";
 			if (query.length == 0)
@@ -384,14 +403,13 @@ export class Search
 			}
 			this.updateBrowserQuery(query);
 			
-			try
-			{
-				await this.searchParseFilters(query);
-			}
-			catch (error)
-			{
-				console.error("Search failed:", error);
-			}
+			if (this.inputSearchTimer !== undefined) window.clearTimeout(this.inputSearchTimer);
+			this.inputSearchTimer = window.setTimeout(() => {
+				this.inputSearchTimer = undefined;
+				void this.searchParseFilters(query).catch((error) => {
+					if ((error as Error)?.name !== "AbortError") console.error("Search failed:", error);
+				});
+			}, Search.inputDebounceMs);
 		});
 
 		return this;

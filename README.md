@@ -195,6 +195,9 @@ node /absolute/path/to/vault/.archivatorium/server/server.mjs \
 | `PORT` | `8000` | Listening port |
 | `VAULT_ROOT` | CLI argument | Alternative way to provide the vault path |
 | `PAGE_CACHE_ENTRIES` | `256` | Maximum rendered Markdown pages in the LRU cache |
+| `SEARCH_CACHE_ENTRIES` | `128` | Maximum search result pages in the server LRU cache; `0` disables it |
+| `SQLITE_MMAP_SIZE_MB` | `1536` | Maximum SQLite database region mapped into memory |
+| `SQLITE_CACHE_SIZE_MB` | `256` | SQLite page-cache target in MiB |
 | `MAX_CHECKOUT_ITEMS` | plugin setting | Deployment override; `0` means unlimited |
 | `MAX_CHECKOUT_BYTES` | `1000000` | Maximum checkout request-body size |
 
@@ -202,6 +205,8 @@ node /absolute/path/to/vault/.archivatorium/server/server.mjs \
 
 If `.archivatorium/corpus.sqlite` is missing or incomplete, repository
 `server.mjs` builds or resumes it before opening the listening port.
+Index format upgrades are rebuilt automatically; the current format uses a
+contentless FTS5 index to avoid storing another full copy of OCR text.
 
 For an existing complete database:
 
