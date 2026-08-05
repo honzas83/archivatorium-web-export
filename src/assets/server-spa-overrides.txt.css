@@ -168,3 +168,19 @@ body #center-content > .obsidian-document > .markdown-preview-sizer {
 #search-wrapper input {
   padding-left: 2.5em;
 }
+
+#search-container {
+  position: relative;
+  width: 100%;
+}
+
+#search-status {
+  position: absolute;
+  top: calc(100% + .15rem);
+  right: 0;
+  left: 0;
+}
+
+#left-sidebar:has(#search-status) #left-sidebar-content {
+  padding-top: calc(4em + 1.75rem);
+}
