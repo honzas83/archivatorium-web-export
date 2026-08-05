@@ -52,6 +52,7 @@ export class Search
 	private documentCount: number = 0;
 	private static readonly inlineMarkClass = "search-mark";
 	private static readonly tagMarkClass = "search-tag-mark";
+	private static readonly outlineMatchClass = "outline-search-match";
 	private static readonly visibleResultLimit = 1000;
 
 	public async search(query: string, type: SearchType = allSearch)
@@ -523,30 +524,34 @@ export class Search
 		const queryPattern = new RegExp(escapedQuery, 'gi');
 		const textNodes = getTextNodes(ObsidianSite.document.sizerEl ?? ObsidianSite.document.documentEl);
 
-		textNodes.forEach(async (node) =>
+		for (const node of textNodes)
 		{
-			const content = node.nodeValue;
-			const newContent = content?.replace(queryPattern, match => `<mark>${match}</mark>`);
+			const parent = node.parentElement;
+			if (!parent || parent.closest(
+				'.callout[data-callout="metadata"], .callout[data-callout="citingthisdocument"], script, style, button, textarea'
+			)) continue;
+			const content = node.nodeValue ?? "";
+			queryPattern.lastIndex = 0;
+			const matches = Array.from(content.matchAll(queryPattern));
+			if (matches.length === 0) continue;
 
-			if (newContent && newContent !== content) 
+			const fragment = document.createDocumentFragment();
+			let cursor = 0;
+			for (const match of matches)
 			{
-				const tempDiv = document.createElement('div');
-				tempDiv.innerHTML = newContent;
-		
-				const newNodes = Array.from(tempDiv.childNodes);
-		
-				newNodes.forEach(newNode => 
-				{
-					if (newNode.nodeType != Node.TEXT_NODE)
-					{
-						(newNode as Element)?.classList.add(Search.inlineMarkClass);
-					}
-					node?.parentNode?.insertBefore(newNode, node);
-				});
-		
-				node?.parentNode?.removeChild(node);
+				const index = match.index ?? 0;
+				if (index > cursor) fragment.appendChild(document.createTextNode(content.slice(cursor, index)));
+				const mark = document.createElement("mark");
+				mark.classList.add(Search.inlineMarkClass);
+				mark.textContent = match[0];
+				fragment.appendChild(mark);
+				cursor = index + match[0].length;
 			}
-		});
+			if (cursor < content.length) fragment.appendChild(document.createTextNode(content.slice(cursor)));
+			node.parentNode?.replaceChild(fragment, node);
+		}
+
+		this.updateOutlineSearchMatches();
 
 		const firstMark = document.querySelector(".search-mark");
 
@@ -555,6 +560,100 @@ export class Search
 		{
 			if(firstMark) ObsidianSite.scrollTo(firstMark);
 		}, 500);
+	}
+
+	private updateOutlineSearchMatches()
+	{
+		const outline = document.querySelector("#outline");
+		const documentRoot = ObsidianSite.document.sizerEl ?? ObsidianSite.document.documentEl;
+		if (!outline || !documentRoot) return;
+
+		let pageId = "";
+		let matchNumber = 0;
+		const pageChildren = new Map<string, HTMLElement>();
+		const content = Array.from(documentRoot.querySelectorAll(
+			"h1, h2, h3, h4, h5, h6, mark.search-mark"
+		)) as HTMLElement[];
+
+		for (const element of content)
+		{
+			if (/^H[1-6]$/.test(element.tagName))
+			{
+				if (/^Page\s+\d+\b/i.test((element.textContent ?? "").trim())) pageId = element.id;
+				continue;
+			}
+			if (!pageId) continue;
+
+			let children = pageChildren.get(pageId);
+			if (!children)
+			{
+				const pageLink = Array.from(outline.querySelectorAll<HTMLAnchorElement>("a[data-path]"))
+					.find((link) => link.dataset.path === `#${pageId}`);
+				const pageItem = pageLink?.parentElement;
+				children = Array.from(pageItem?.children ?? [])
+					.find((child) => child.classList.contains("tree-item-children")) as HTMLElement | undefined;
+				if (!children) continue;
+				pageChildren.set(pageId, children);
+			}
+
+			matchNumber++;
+			const anchorId = `search-match-${matchNumber}`;
+			element.id = anchorId;
+			const context = this.getMatchContext(element);
+			const item = document.createElement("div");
+			item.classList.add("tree-item", Search.outlineMatchClass);
+			item.dataset.depth = String(Number(children.parentElement?.dataset.depth ?? 1) + 1);
+			const link = document.createElement("a");
+			link.classList.add("tree-item-self", "is-clickable");
+			link.href = `#${anchorId}`;
+			link.dataset.path = `#${anchorId}`;
+			link.setAttribute("aria-label", `Go to occurrence: ${context.before} ${element.textContent ?? ""} ${context.after}`.trim());
+			const label = document.createElement("div");
+			label.classList.add("tree-item-inner");
+			label.appendChild(document.createTextNode(`${context.hasBefore ? "… " : ""}${context.before}`));
+			const mark = document.createElement("mark");
+			mark.classList.add(Search.inlineMarkClass);
+			mark.textContent = element.textContent;
+			label.appendChild(mark);
+			label.appendChild(document.createTextNode(`${context.after}${context.hasAfter ? " …" : ""}`));
+			link.appendChild(label);
+			link.addEventListener("click", (event) =>
+			{
+				event.preventDefault();
+				ObsidianSite.scrollTo(element);
+			});
+			item.appendChild(link);
+			children.appendChild(item);
+		}
+	}
+
+	private getMatchContext(mark: HTMLElement): { before: string, after: string, hasBefore: boolean, hasAfter: boolean }
+	{
+		const block = mark.closest("p, li, td, th, blockquote, pre") ?? mark.parentElement;
+		const text = block?.textContent ?? mark.textContent ?? "";
+		const marks = Array.from(block?.querySelectorAll(`.${Search.inlineMarkClass}`) ?? []);
+		let cursor = 0;
+		let start = text.toLowerCase().indexOf((mark.textContent ?? "").toLowerCase());
+		for (const candidate of marks)
+		{
+			const value = candidate.textContent ?? "";
+			const index = text.toLowerCase().indexOf(value.toLowerCase(), cursor);
+			if (candidate === mark) {
+				start = index;
+				break;
+			}
+			if (index >= 0) cursor = index + value.length;
+		}
+		start = Math.max(0, start);
+		const end = start + (mark.textContent?.length ?? 0);
+		const contextLength = 32;
+		const hasBefore = start > contextLength;
+		const hasAfter = text.length - end > contextLength;
+		let before = text.slice(Math.max(0, start - contextLength), start).replace(/\s+/g, " ");
+		let after = text.slice(end, end + contextLength).replace(/\s+/g, " ");
+		if (hasBefore) before = before.replace(/^\S*\s*/, "");
+		if (hasAfter) after = after.replace(/\s*\S*$/, "");
+		return { before: before.trimStart(), after: after.trimEnd(), hasBefore, hasAfter };
 	}
 
 	private highlightTagInCurrentDocument(query: string)
@@ -584,9 +683,10 @@ export class Search
 
 	private clearCurrentDocumentSearch()
 	{
+		document.querySelectorAll(`#outline .${Search.outlineMatchClass}`).forEach((node) => node.remove());
 		document.querySelectorAll(`.${Search.inlineMarkClass}`).forEach(node =>
 		{
-			node.outerHTML = node.innerHTML;
+			node.replaceWith(document.createTextNode(node.textContent ?? ""));
 		});
 		document.querySelectorAll(`.${Search.tagMarkClass}`).forEach((node) =>
 		{

@@ -67,6 +67,27 @@ body #center-content > .obsidian-document > .markdown-preview-sizer {
   font-weight: 700;
 }
 
+#outline .outline-search-match > .tree-item-self {
+	align-items: flex-start;
+	padding-top: 3px;
+	padding-bottom: 3px;
+	font-family: var(--font-text);
+	font-size: 13px;
+	font-weight: 400;
+	line-height: 1.45;
+}
+
+#outline .outline-search-match .tree-item-inner {
+	overflow: visible;
+	white-space: normal;
+	text-overflow: clip;
+}
+
+#outline .outline-search-match .search-mark {
+	background: var(--text-highlight-bg);
+	color: var(--text-normal);
+}
+
 /* Match the navigation geometry of the regular exported site. */
 .tree-container {
   --nav-item-size: 14px;
