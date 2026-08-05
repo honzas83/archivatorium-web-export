@@ -25,6 +25,7 @@ const PAGE_CACHE_ENTRIES = Math.max(1, Number(process.env.PAGE_CACHE_ENTRIES ?? 
 const SEARCH_CACHE_ENTRIES = Math.max(0, Number(process.env.SEARCH_CACHE_ENTRIES ?? 128));
 const SQLITE_MMAP_SIZE_MB = Math.max(0, Number(process.env.SQLITE_MMAP_SIZE_MB ?? 1536));
 const SQLITE_CACHE_SIZE_MB = Math.max(1, Number(process.env.SQLITE_CACHE_SIZE_MB ?? 256));
+const DOWNLOAD_ALLOWLIST = parseDownloadAllowlist(process.env.DOWNLOAD_ALLOWLIST ?? "");
 let corpusDatabasePromise;
 const markdownRenderer = new MarkdownDocumentRenderer({ maxEntries: PAGE_CACHE_ENTRIES });
 const searchCache = new Map();
@@ -58,7 +59,35 @@ const contentTypes = new Map([
 	[".webp", "image/webp"],
 	[".wasm", "application/wasm"],
 	[".pdf", "application/pdf"],
+	[".zip", "application/zip"],
 ]);
+
+function parseDownloadAllowlist(value) {
+	if (!value.trim()) return new Set();
+	let entries;
+	if (value.trimStart().startsWith("[")) {
+		entries = JSON.parse(value);
+		if (!Array.isArray(entries)) throw new Error("DOWNLOAD_ALLOWLIST must be a JSON array or a comma-separated list.");
+	} else {
+		entries = value.split(/[\n,]/);
+	}
+
+	const result = new Set();
+	for (const entry of entries) {
+		if (typeof entry !== "string" || !entry.trim()) continue;
+		const sourcePath = entry.trim().replaceAll("\\", "/");
+		const segments = sourcePath.split("/");
+		if (
+			path.posix.isAbsolute(sourcePath) ||
+			segments.some((segment) => segment === "." || segment === "..") ||
+			segments[0]?.startsWith(".")
+		) {
+			throw new Error(`Invalid DOWNLOAD_ALLOWLIST path: ${entry}`);
+		}
+		result.add(path.posix.normalize(sourcePath));
+	}
+	return result;
+}
 
 function requireConfig() {
 	if (!PUBLIC_ARCHIVE_ROOT) {
@@ -1363,6 +1392,67 @@ async function handleCheckout(request, response) {
 	}
 }
 
+function parseByteRange(value, size) {
+	const match = /^bytes=(\d*)-(\d*)$/.exec(value ?? "");
+	if (!match || (!match[1] && !match[2])) return undefined;
+	let start;
+	let end;
+	if (!match[1]) {
+		const suffixLength = Number(match[2]);
+		if (!Number.isSafeInteger(suffixLength) || suffixLength <= 0) return undefined;
+		start = Math.max(0, size - suffixLength);
+		end = size - 1;
+	} else {
+		start = Number(match[1]);
+		end = match[2] ? Number(match[2]) : size - 1;
+		if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start > end) return undefined;
+	}
+	if (start >= size) return undefined;
+	return { start, end: Math.min(end, size - 1) };
+}
+
+function downloadDisposition(filename) {
+	const fallback = filename.replace(/[^\x20-\x7e]|["\\]/g, "_");
+	return `attachment; filename="${fallback}"; filename*=UTF-8''${encodeURIComponent(filename)}`;
+}
+
+async function serveAllowlistedDownload(request, response, requestedPath) {
+	if (!DOWNLOAD_ALLOWLIST.has(requestedPath)) return false;
+	try {
+		const source = normalizeVaultFilePath(requestedPath);
+		const sourceStat = await stat(source.absolutePath);
+		if (!sourceStat.isFile()) throw new Error("Not a file");
+		const range = request.headers.range ? parseByteRange(request.headers.range, sourceStat.size) : undefined;
+		if (request.headers.range && !range) {
+			response.writeHead(416, {
+				"Content-Range": `bytes */${sourceStat.size}`,
+				"Content-Length": 0,
+			});
+			response.end();
+			return true;
+		}
+		const headers = {
+			"Accept-Ranges": "bytes",
+			"Cache-Control": "no-cache",
+			"Content-Disposition": downloadDisposition(path.basename(source.absolutePath)),
+			"Content-Type": contentTypes.get(path.extname(source.absolutePath).toLowerCase()) ?? "application/octet-stream",
+			"Content-Length": range ? range.end - range.start + 1 : sourceStat.size,
+		};
+		if (range) headers["Content-Range"] = `bytes ${range.start}-${range.end}/${sourceStat.size}`;
+		response.writeHead(range ? 206 : 200, headers);
+		if (request.method === "HEAD") {
+			response.end();
+			return true;
+		}
+		createReadStream(source.absolutePath, range ?? undefined)
+			.on("error", () => response.destroy())
+			.pipe(response);
+	} catch {
+		send(response, 404, "Not found", { "Content-Type": "text/plain; charset=utf-8" });
+	}
+	return true;
+}
+
 async function serveStatic(request, response) {
 	const requestURL = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
 	let pathname = decodeURIComponent(requestURL.pathname);
@@ -1382,6 +1472,7 @@ async function serveStatic(request, response) {
 	if (pathname.endsWith("/")) pathname += "index.html";
 	if (pathname === "/") pathname = "/index.html";
 	const requestedExportPath = pathname.replace(/^\/+/, "");
+	if (await serveAllowlistedDownload(request, response, requestedExportPath)) return;
 	try {
 		const database = await getCorpusDatabase();
 		const document = database.prepare(
@@ -1476,6 +1567,8 @@ async function resolveMetadataRedirect(pathname) {
 
 export const internals = {
 	getMaxCheckoutItems,
+	parseDownloadAllowlist,
+	parseByteRange,
 	buildSourceIndexes,
 	normalizeVaultPath,
 	normalizeVaultFilePath,

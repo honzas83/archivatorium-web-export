@@ -198,6 +198,7 @@ node /absolute/path/to/vault/.archivatorium/server/server.mjs \
 | `SEARCH_CACHE_ENTRIES` | `128` | Maximum search result pages in the server LRU cache; `0` disables it |
 | `SQLITE_MMAP_SIZE_MB` | `1536` | Maximum SQLite database region mapped into memory |
 | `SQLITE_CACHE_SIZE_MB` | `256` | SQLite page-cache target in MiB |
+| `DOWNLOAD_ALLOWLIST` | empty | Exact vault-relative files exposed as downloads; use a comma-separated list or JSON array |
 | `MAX_CHECKOUT_ITEMS` | plugin setting | Deployment override; `0` means unlimited |
 | `MAX_CHECKOUT_BYTES` | `1000000` | Maximum checkout request-body size |
 
@@ -220,6 +221,19 @@ For an existing complete database:
 Only referenced attachments receive attachment records. Attachment contents
 are not extracted into FTS. In particular, PDF text is not indexed unless it
 also exists in a Markdown document.
+
+Files that are not referenced attachments remain private by default. To expose
+an existing static archive without publishing the rest of the vault, add its
+exact vault-relative path to `DOWNLOAD_ALLOWLIST`:
+
+```bash
+DOWNLOAD_ALLOWLIST=NATO_Mass_Files_metadata_v7.zip \
+PUBLIC_ARCHIVE_ROOT=https://archive.example.org/ \
+node .archivatorium/server/server.mjs /absolute/path/to/vault
+```
+
+The file is then available at `/NATO_Mass_Files_metadata_v7.zip`. Downloads are
+streamed and support byte ranges, so large transfers can be resumed.
 
 ## Upgrade an existing vault
 

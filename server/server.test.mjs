@@ -30,6 +30,8 @@ Version one with complete searchable text, [[Target]], [Loose](Loose.md), ![[Att
 	await writeFile(path.join(vaultRoot, "Target.md"), "# Target\n\nTarget content.");
 	await writeFile(path.join(vaultRoot, "Archive", "Loose.md"), "# Loose\n\nLoose content.");
 	await writeFile(path.join(vaultRoot, "Attachments", "Report.pdf"), "PDF fixture");
+	await writeFile(path.join(vaultRoot, "NATO_Mass_Files_metadata_v7.zip"), "ZIP fixture");
+	await writeFile(path.join(vaultRoot, "private.zip"), "Private fixture");
 	const configPath = path.join(vaultRoot, ".obsidian", "plugins", "archivatorium-web-export", "data.json");
 	await writeFile(configPath, JSON.stringify({
 		exportOptions: {
@@ -51,6 +53,7 @@ Version one with complete searchable text, [[Target]], [Loose](Loose.md), ![[Att
 
 	process.env.VAULT_ROOT = vaultRoot;
 	process.env.PUBLIC_ARCHIVE_ROOT = "https://archive.example/";
+	process.env.DOWNLOAD_ALLOWLIST = "NATO_Mass_Files_metadata_v7.zip";
 	const { createArchivatoriumServer, internals } = await import(
 		`./server.mjs?test=${Date.now()}`
 	);
@@ -171,6 +174,19 @@ Version one with complete searchable text, [[Target]], [Loose](Loose.md), ![[Att
 		const attachmentPage = await attachmentPageResponse.json();
 		assert.match(attachmentPage.html, /class="document-pdf-embed"/);
 		assert.doesNotMatch(attachmentPage.html, /markdown-preview-sizer/);
+
+		const archiveResponse = await fetch(`${baseURL}/NATO_Mass_Files_metadata_v7.zip`);
+		assert.equal(archiveResponse.status, 200);
+		assert.equal(archiveResponse.headers.get("content-type"), "application/zip");
+		assert.match(archiveResponse.headers.get("content-disposition"), /^attachment;/);
+		assert.equal(await archiveResponse.text(), "ZIP fixture");
+		const archiveRangeResponse = await fetch(`${baseURL}/NATO_Mass_Files_metadata_v7.zip`, {
+			headers: { Range: "bytes=4-10" },
+		});
+		assert.equal(archiveRangeResponse.status, 206);
+		assert.equal(archiveRangeResponse.headers.get("content-range"), "bytes 4-10/11");
+		assert.equal(await archiveRangeResponse.text(), "fixture");
+		assert.equal((await fetch(`${baseURL}/private.zip`)).status, 404);
 
 		const shellResponse = await fetch(`${baseURL}/folder/document.html`);
 		assert.equal(shellResponse.status, 200);
