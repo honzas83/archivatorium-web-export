@@ -180,6 +180,8 @@ export class WebsiteData
 {
 	/** Present when the companion server supplies the file tree lazily. */
 	navigationMode?: "lazy";
+	/** Number of Markdown documents indexed by the companion server. */
+	documentCount: number = 0;
 	ignoreMetadata: boolean = false;
 	serverMetadata: boolean = false;
 	metadataShards?: {

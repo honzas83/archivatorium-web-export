@@ -121,6 +121,7 @@ Version one with complete searchable text, [[Target]], [Loose](Loose.md), ![[Att
 		assert.equal(bootstrapResponse.status, 200);
 		const bootstrap = await bootstrapResponse.json();
 		assert.equal(bootstrap.navigationMode, "lazy");
+		assert.equal(bootstrap.documentCount, 3);
 		assert.notEqual(bootstrap.applicationVersion, "stale-application");
 		assert.equal(bootstrap.tagTree.find((item) => item.path === "Topic")?.hasChildren, true);
 		assert.deepEqual(bootstrap.tagTree.find((item) => item.path === "Topic")?.children, []);

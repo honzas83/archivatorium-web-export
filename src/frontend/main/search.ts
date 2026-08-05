@@ -49,6 +49,7 @@ export class Search
 	private status: HTMLElement;
 	private statusCount: HTMLElement;
 	private statusLimit: HTMLElement;
+	private documentCount: number = 0;
 	private static readonly inlineMarkClass = "search-mark";
 	private static readonly tagMarkClass = "search-tag-mark";
 	private static readonly visibleResultLimit = 1000;
@@ -312,7 +313,7 @@ export class Search
 	{
 		this.searchRequestId++;
 		this.container?.classList.remove("has-content");
-		this.setSearchStatus("idle");
+		this.setSearchStatus("idle", this.documentCount);
 		this.input.value = "";
 		this.updateBrowserQuery("");
 		this.clearCurrentDocumentSearch();
@@ -335,6 +336,8 @@ export class Search
 
 		this.serverSide = ObsidianSite.metadata.featureOptions.search.serverSide === true;
 		this.searchEndpoint = ObsidianSite.metadata.featureOptions.search.searchEndpoint ?? "/api/search";
+		this.documentCount = Number(ObsidianSite.metadata.documentCount ?? 0);
+		this.setSearchStatus("idle", this.documentCount);
 
 		if (!this.serverSide)
 		{
@@ -439,7 +442,7 @@ export class Search
 		this.status.className = `search-status is-${state}`;
 		this.statusLimit.textContent = "";
 
-		if (state === "idle") this.statusCount.textContent = "";
+		if (state === "idle") this.statusCount.textContent = `${total.toLocaleString()} ${total === 1 ? "document" : "documents"}`;
 		else if (state === "searching") this.statusCount.textContent = "Searching…";
 		else if (state === "error") this.statusCount.textContent = "Search unavailable";
 		else if (total === 0) this.statusCount.textContent = "No matching documents";

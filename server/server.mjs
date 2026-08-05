@@ -283,6 +283,10 @@ async function handleMetadataBootstrap(_request, response) {
 async function getAppBootstrap() {
 	const metadata = JSON.parse(await readFile(path.join(SERVER_ROOT, "site-lib", "metadata.json"), "utf8"));
 	const tagSnapshot = await getTagSnapshot();
+	const database = await getCorpusDatabase();
+	metadata.documentCount = Number(database.prepare(
+		"SELECT COUNT(*) AS count FROM metadata_documents WHERE kind = 'webpage'"
+	).get().count);
 	metadata.tagTree = serializeTagChildren(tagSnapshot.get("") ?? []);
 	metadata.webpages = {};
 	metadata.fileInfo = {};
