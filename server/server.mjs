@@ -6,7 +6,7 @@ import { readFile, readdir, stat } from "node:fs/promises";
 import { DatabaseSync } from "node:sqlite";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { exportMarkdownSpa, getMarkdownSpaApplicationVersion, writeMarkdownSpaApplication } from "./export-markdown-spa.mjs";
+import { exportMarkdownSpa, getMarkdownSpaApplicationVersion, SERVER_RUNTIME_FILENAMES, writeMarkdownSpaApplication } from "./export-markdown-spa.mjs";
 import { MarkdownDocumentRenderer } from "./markdown-renderer.mjs";
 import { resolveCorpusDatabasePath, resolveServerRoot, resolveVaultRoot } from "./vault-layout.mjs";
 
@@ -40,6 +40,8 @@ const APPLICATION_FILES = [
 	"site-lib/metadata.json",
 	"site-lib/styles/app.css",
 	"site-lib/scripts/webpage.js",
+	...SERVER_RUNTIME_FILENAMES.map((filename) => `server/${filename}`),
+	"server/package.json",
 ];
 
 const contentTypes = new Map([

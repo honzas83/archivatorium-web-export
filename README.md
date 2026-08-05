@@ -20,7 +20,7 @@ vault/
 │   ├── corpus.sqlite
 │   ├── index.html
 │   ├── favicon.png
-│   ├── server/                 # installed by the Obsidian plugin
+│   ├── server/
 │   └── site-lib/
 ├── .obsidian/
 ├── Notes/
@@ -129,6 +129,9 @@ npm run build
 node server/export-markdown-spa.mjs /absolute/path/to/vault
 ```
 
+The direct exporter also installs the complete companion runtime under
+`.archivatorium/server`, so its output is equivalent to the plugin workflow.
+
 An optional second argument supplies plugin-compatible settings from another
 location:
 
@@ -170,8 +173,8 @@ When started from a repository checkout, the server compares the current
 frontend application with the copy in `.archivatorium`. Missing or older SPA
 assets are rebuilt automatically without rebuilding a valid SQLite database.
 
-The server can also be run from the files installed into the vault by the
-Obsidian plugin:
+The server can also be run from the files installed into the vault by either
+export workflow:
 
 ```bash
 npm install --prefix /absolute/path/to/vault/.archivatorium/server

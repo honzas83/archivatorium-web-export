@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { DatabaseSync } from "node:sqlite";
 import path from "node:path";
 import test from "node:test";
-import { exportMarkdownSpa } from "./export-markdown-spa.mjs";
+import { exportMarkdownSpa, SERVER_RUNTIME_FILENAMES } from "./export-markdown-spa.mjs";
 
 test("pure Node export creates a compact SPA corpus without Obsidian", async () => {
 	const root = await mkdtemp(path.join(tmpdir(), "markdown-spa-export-"));
@@ -88,6 +88,12 @@ Inline code \`#CodeTag\` and escaped \\#EscapedTag are not tags.
 		assert.match(shell, /<base href="\/">/);
 		assert.match(shell, /<link rel="icon" href="\/favicon\.png">/);
 		assert.equal((await stat(path.join(output, "favicon.png"))).size > 0, true);
+		for (const filename of SERVER_RUNTIME_FILENAMES) {
+			assert.equal((await stat(path.join(output, "server", filename))).isFile(), true);
+		}
+		const serverPackage = JSON.parse(await readFile(path.join(output, "server", "package.json"), "utf8"));
+		assert.equal(serverPackage.name, "archivatorium-web-export-server");
+		assert.equal(serverPackage.dependencies["markdown-it"], "^14.1.0");
 		assert.equal((shell.match(/sidebar-collapse-icon/g) ?? []).length, 2);
 		assert.equal((shell.match(/sidebar-handle/g) ?? []).length, 2);
 		assert.equal(JSON.parse(await readFile(path.join(output, "site-lib", "metadata.json"), "utf8")).serverMetadata, true);
