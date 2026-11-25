@@ -81,12 +81,6 @@ are not counted repeatedly:
   legacy generated HTML that the current SPA architecture no longer creates.
 - During the 61,647-file initialization scan, `arrayBuffers` remained at zero.
 
-The Docker wrapper starts exports with a 12 GiB container memory limit and a
-16 GiB memory-plus-swap limit. Override these values when necessary, for
-example `EXPORT_MEMORY=16g EXPORT_MEMORY_SWAP=20g`. Docker Desktop must itself
-have enough memory allocated; container limits cannot exceed the Desktop VM's
-available memory.
-
 ## Validation
 
 Use the Node 24 commands documented in `AGENTS.md`:

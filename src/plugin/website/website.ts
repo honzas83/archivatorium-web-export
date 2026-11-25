@@ -226,8 +226,7 @@ export class Website
 		const completeDocument = async (subMessage: string): Promise<void> =>
 		{
 			progress += 1;
-			// Persist the resume index before reporting a checkpoint boundary as done.
-			// The Docker runner may intentionally restart immediately after this log.
+			// Persist the resume index before logging checkpoint progress.
 			if (progress % 500 === 0)
 			{
 				await this.index.writeCheckpoint();
@@ -250,7 +249,6 @@ export class Website
 
 		for (const sourceFile of this.markdownSourceFiles)
 		{
-			if (ExportLog.isCancelled()) return;
 			const targetPath = this.getTargetPathForFile(sourceFile, sourceFile.name);
 			targetPath.setExtension("html");
 			if (await this.index.isMarkdownCorpusCurrent(targetPath.path, sourceFile.stat.mtime, sourceFile.stat.size))

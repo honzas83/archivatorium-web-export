@@ -2104,7 +2104,4 @@ export namespace ExportLog {
 		}
 	}
 
-	export function isCancelled() {
-		return _MarkdownRendererInternal.checkCancelled();
-	}
 }

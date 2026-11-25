@@ -122,7 +122,7 @@ Inline code \`#CodeTag\` and escaped \\#EscapedTag are not tags.
 		}
 		const serverPackage = JSON.parse(await readFile(path.join(output, "server", "package.json"), "utf8"));
 		assert.equal(serverPackage.name, "archivatorium-web-export-server");
-		assert.equal(serverPackage.dependencies["markdown-it"], "^14.1.0");
+		assert.equal(serverPackage.dependencies["markdown-it"], "^14.3.3");
 		assert.equal((shell.match(/sidebar-collapse-icon/g) ?? []).length, 2);
 		assert.equal((shell.match(/sidebar-handle/g) ?? []).length, 2);
 		assert.equal(JSON.parse(await readFile(path.join(output, "site-lib", "metadata.json"), "utf8")).serverMetadata, true);

@@ -24,11 +24,6 @@ export default class HTMLExportPlugin extends Plugin {
 	public dv = DataviewRenderer;
 	public Website = Website;
 
-	public async exportDocker() {
-		await HTMLExporter.export(true);
-		if (!HTMLExporter.lastExportSucceeded) throw new Error("Export did not complete.");
-	}
-
 	public async exportVault() {
 		await HTMLExporter.exportVault(true, false);
 		if (!HTMLExporter.lastExportSucceeded) throw new Error("Export did not complete.");

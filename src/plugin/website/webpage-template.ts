@@ -143,7 +143,9 @@ export class WebpageTemplate
 	/** Insert the empty shell that the server-backed file tree fills after load. */
 	public insertLazyFileExplorer(featureOptions: InsertedFeatureOptions): void
 	{
-		const explorer = this.doc.createDiv({ attr: { id: "file-explorer", class: "nav-files-container" } });
+		const explorer = this.doc.createElement("div");
+		explorer.id = "file-explorer";
+		explorer.className = "nav-files-container";
 		this.insertFeature(explorer, featureOptions);
 	}
 

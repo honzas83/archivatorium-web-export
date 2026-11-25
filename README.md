@@ -69,24 +69,12 @@ verified directly with the complete build and server test suite.
 
 ## Installation
 
-The plugin is distributed from GitHub and is not currently listed in the
-Obsidian Community Plugins directory.
-
 ### Manual plugin installation
 
-1. Download the ZIP from the
-   [latest release](https://github.com/honzas83/archivatorium-web-export/releases/latest).
-2. Extract it to
+1. Clone this repository and run `npm ci` and `npm run build` in the checkout.
+2. Copy `main.js`, `manifest.json`, and `styles.css` to
    `<vault>/.obsidian/plugins/archivatorium-web-export/`.
 3. Reload Obsidian and enable **Archivatorium Web Export**.
-
-### BRAT
-
-Install BRAT, choose **Add beta plugin**, and use:
-
-```text
-https://github.com/honzas83/archivatorium-web-export
-```
 
 ## Generate a vault application
 
@@ -123,7 +111,7 @@ This is the simplest headless workflow and does not start Obsidian:
 ```bash
 git clone https://github.com/honzas83/archivatorium-web-export.git
 cd archivatorium-web-export
-npm install
+npm ci
 npm run build
 
 node server/export-markdown-spa.mjs /absolute/path/to/vault
@@ -242,7 +230,7 @@ When serving from the repository:
 ```bash
 cd /path/to/archivatorium-web-export
 git pull --ff-only
-npm install
+npm ci
 npm run build
 ```
 
@@ -252,22 +240,6 @@ the desired plugin configuration changed and the SQLite snapshot must be
 updated.
 
 Do not delete `corpus.sqlite` for a normal code upgrade.
-
-## Optional Docker workflow
-
-The repository retains an Obsidian/Electron Docker runner for environments
-that require the plugin workflow:
-
-```bash
-./run-archivatorium-docker.sh \
-  /absolute/path/to/vault \
-  [/absolute/path/to/data.json]
-```
-
-It builds `archivatorium-web-export:local`, mounts the vault at `/vault`, and
-writes `.archivatorium` inside the vault. Both paths passed to the script must
-be absolute. The direct Node exporter is preferred when Obsidian rendering is
-not required.
 
 ## Deployment and security
 
@@ -302,9 +274,8 @@ npm run build
 npm run test:server
 ```
 
-The release artifact contains `main.js`, `manifest.json`, and `styles.css` for
-the Obsidian plugin. The generated companion server declares its runtime
-dependency in `.archivatorium/server/package.json`.
+The generated companion server declares its runtime dependency in
+`.archivatorium/server/package.json`.
 
 ## Relationship to upstream
 
